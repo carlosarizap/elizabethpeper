@@ -14,7 +14,7 @@ export async function GET() {
       console.log("Realizando solicitud a Mercado Libre...");
   
       const response = await fetch(
-        `https://api.mercadolibre.com/orders/search?seller=${seller_id}&sort=date_desc&limit=1`,
+        `https://api.mercadolibre.com/orders/search?seller=${seller_id}&sort=date_desc&limit=1&offset=3`,
         {
           method: "GET",
           headers: {
@@ -41,15 +41,21 @@ export async function GET() {
       const insertedOrders = [];
   
       for (const order of orders) {
+        const item = order.order_items?.[0]?.item;
+        const quantity = order.order_items?.[0]?.quantity;
+      
         const result = await createOrder({
           orderId: order.id.toString(),
           totalAmount: order.total_amount,
           status: order.status,
           marketplace: MARKETPLACES.MERCADO_LIBRE,
+          productTitle: item?.title ?? 'Sin título',
+          productQuantity: quantity ?? 1,
         });
-  
+      
         insertedOrders.push(result);
       }
+      
   
       return NextResponse.json({ inserted: insertedOrders });
     } catch (error) {

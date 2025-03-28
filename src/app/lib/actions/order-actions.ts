@@ -7,6 +7,8 @@ export async function createOrder(order: {
   totalAmount: number;
   status: string;
   marketplace?: string;
+  productTitle: string;
+  productQuantity: number;
 }) {
   try {
     const client = await pool.connect();
@@ -23,8 +25,8 @@ export async function createOrder(order: {
 
     const insert = await client.query(
       `
-      INSERT INTO orders (order_id, total_amount, status, marketplace)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO orders (order_id, total_amount, status, marketplace, product_title, product_quantity)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *
     `,
       [
@@ -32,6 +34,8 @@ export async function createOrder(order: {
         order.totalAmount,
         order.status,
         order.marketplace ?? 'mercado_libre',
+        order.productTitle,
+        order.productQuantity,
       ]
     );
 

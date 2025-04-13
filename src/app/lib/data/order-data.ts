@@ -22,10 +22,17 @@ export async function fetchOrders(page: number = 1, query: string = '') {
         delivery_date
       FROM orders
       WHERE 
-        product_title ILIKE $1 OR
+        (product_title ILIKE $1 OR
         status ILIKE $1 OR
-        order_id::TEXT ILIKE $1
-      ORDER BY delivery_date ASC
+        order_id::TEXT ILIKE $1) AND
+        delivery_date >= CURRENT_DATE
+      ORDER BY 
+        CASE 
+          WHEN marketplace = 'mercado_libre' THEN 1
+          WHEN marketplace = 'falabella' THEN 2
+          ELSE 3
+        END,
+        delivery_date ASC
       LIMIT $2 OFFSET $3`,
       [`%${query}%`, ITEMS_PER_PAGE, offset]
     );

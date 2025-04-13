@@ -36,7 +36,7 @@ export async function GET() {
     console.log("Realizando solicitud a Mercado Libre...");
 
     const response = await fetch(
-      `https://api.mercadolibre.com/orders/search?seller=${seller_id}&sort=date_desc&limit=1&offset=3`,
+      `https://api.mercadolibre.com/orders/search?seller=${seller_id}&sort=date_desc&limit=50`,
       {
         method: "GET",
         headers: {

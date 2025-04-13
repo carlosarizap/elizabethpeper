@@ -25,9 +25,11 @@ const OrderList = () => {
 
   return (
     <div className="container mx-auto p-4 bg-white text-black shadow rounded-lg">
-    <h1 className="text-2xl font-bold mb-4">Órdenes de Mercado Libre</h1>
-    <table className="w-full text-sm border border-gray-200">
-      <thead className="bg-gray-100">
+  <h1 className="text-2xl font-bold mb-4">Órdenes</h1>
+  
+  <div className="overflow-y-auto max-h-[550px] border border-gray-300 rounded-md">
+    <table className="w-full text-sm">
+      <thead className="bg-gray-100 sticky top-0 z-10">
         <tr>
           <th className="text-left px-2 py-1">CANT</th>
           <th className="text-left px-2 py-1">PRODUCTO</th>
@@ -57,7 +59,9 @@ const OrderList = () => {
         ))}
       </tbody>
     </table>
-  </div>  
+  </div>
+</div>
+
   );
 };
 

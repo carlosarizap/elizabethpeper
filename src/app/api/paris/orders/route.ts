@@ -20,7 +20,7 @@ export async function GET() {
     const startDate = getFechaHaceDias(7);
     const endDate = new Date().toISOString().split("T")[0];
 
-    const url = `https://api-developers.ecomm-stg.cencosud.com/v1/orders?gteCreatedAt=${startDate}&lteCreatedAt=${endDate}&sellerId=${sellerId}`;
+    const url = `https://api-developers.ecomm.cencosud.com/v1/orders?gteCreatedAt=${startDate}&lteCreatedAt=${endDate}&sellerId=${sellerId}`;
 
     const response = await fetch(url, {
       headers: {
@@ -35,19 +35,38 @@ export async function GET() {
 
     for (const order of orders) {
       for (const subOrder of order.subOrders) {
-        for (const item of subOrder.items) {
-          const result = await createOrder({
-            orderId: `${order.id}-${subOrder.subOrderNumber}-${item.id}`,
-            totalAmount: parseFloat(item.priceAfterDiscounts?.toString() || "0"),
-            status: item.status?.name || "unknown",
-            marketplace: MARKETPLACES.PARIS,
-            productTitle: item.name || "Sin título",
-            productQuantity: 1,
-            deliveryDate: subOrder.arrivalDate || subOrder.dispatchDate || new Date().toISOString(),
-          });
+        const groupedByName = new Map<string, typeof subOrder.items>();
 
-          insertedOrders.push(result);
+        for (const item of subOrder.items) {
+          const key = item?.name || "Sin título";
+          if (!groupedByName.has(key)) groupedByName.set(key, []);
+          groupedByName.get(key)!.push(item);
         }
+
+        let groupIndex = 1;
+
+        for (const [name, items] of groupedByName.entries()) {
+          const totalAmount = items.reduce(
+            (acc: number, item: any) => acc + parseFloat(item.priceAfterDiscounts?.toString() || "0"),
+            0
+          );
+        
+          const totalQuantity = items.length;
+        
+          const result = await createOrder({
+            orderId: `${subOrder.subOrderNumber}-G${groupIndex.toString().padStart(2, "0")}`,
+            totalAmount,
+            status: items[0]?.status?.name || "unknown",
+            marketplace: MARKETPLACES.PARIS,
+            productTitle: name,
+            productQuantity: totalQuantity,
+            deliveryDate:  subOrder.dispatchDate || new Date().toISOString(),
+          });
+        
+          insertedOrders.push(result);
+          groupIndex++;
+        }
+        
       }
     }
 

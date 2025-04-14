@@ -24,3 +24,35 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@media print {
+  html, body {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+    font-size: 12px;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  thead {
+    background-color: #e5e7eb !important; /* gris claro */
+    color: #111 !important;
+    border-bottom: 1px solid #555 !important;
+  }
+
+  tr:nth-child(even) {
+    background-color: #f3f4f6 !important;
+  }
+
+  tr:nth-child(odd) {
+    background-color: #ffffff !important;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    box-shadow: none !important;
+  }
+}

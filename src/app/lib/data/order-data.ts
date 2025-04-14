@@ -30,6 +30,8 @@ export async function fetchOrders(page: number = 1, query: string = '') {
         CASE 
           WHEN marketplace = 'mercado_libre' THEN 1
           WHEN marketplace = 'falabella' THEN 2
+          WHEN marketplace = 'ripley' THEN 3
+          WHEN marketplace = 'paris' THEN 4
           ELSE 3
         END,
         delivery_date ASC

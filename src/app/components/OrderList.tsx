@@ -26,15 +26,15 @@ const OrderList = () => {
         setLoading(false);
       }
     };
-  
+
     fetchOrders();
   }, []);
-  
+
 
   if (loading) return <p className="text-center mt-5">Cargando órdenes...</p>;
 
   return (
-    <div className="p-6 bg-white text-black rounded-lg print:shadow-none print:p-0 print:bg-white font-sans">
+    <div className="p-0 sm:p-6  bg-white text-black rounded-lg print:shadow-none print:p-0 print:bg-white font-sans">
       {/* Logo central */}
       <div className="flex justify-center mb-6">
         <Image
@@ -55,9 +55,9 @@ const OrderList = () => {
               <th className="px-2 py-1 text-left print:py-0.5">PRODUCTO</th>
               <th className="px-2 py-1 text-left print:py-0.5">MARKETPLACE</th>
               <th className="px-2 py-1 text-left print:py-0.5">ENTREGA</th>
-              <th className="px-1 py-1 text-center print:py-0.5">C</th>
-              <th className="px-1 py-1 text-center print:py-0.5">P</th>
-              <th className="px-1 py-1 text-center print:py-0.5">T</th>
+              <th className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5">C</th>
+              <th className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5">P</th>
+              <th className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5">T</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 print:divide-gray-400">
@@ -84,9 +84,9 @@ const OrderList = () => {
                     day: "numeric",
                   })}
                 </td>
-                <td className="px-1 py-1 text-center print:py-0.5"><input type="checkbox" /></td>
-                <td className="px-1 py-1 text-center print:py-0.5"><input type="checkbox" /></td>
-                <td className="px-1 py-1 text-center print:py-0.5"><input type="checkbox" /></td>
+                <td className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5"><input type="checkbox" /></td>
+                <td className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5"><input type="checkbox" /></td>
+                <td className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5"><input type="checkbox" /></td>
               </tr>
 
             ))}

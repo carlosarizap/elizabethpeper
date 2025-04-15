@@ -9,6 +9,8 @@ const getMarketplaceLogo = (marketplace: Marketplace) => {
 
 const OrderList = () => {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [rellenos, setRellenos] = useState<Record<string, number>>({});
+
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -16,16 +18,18 @@ const OrderList = () => {
       try {
         const res = await fetch("/api/orders");
         const data = await res.json();
-        setOrders(data);
+        setOrders(data.orders || []);
+        setRellenos(data.rellenos || {});
       } catch (error) {
         console.error("Error al cargar órdenes:", error);
       } finally {
         setLoading(false);
       }
     };
-
+  
     fetchOrders();
   }, []);
+  
 
   if (loading) return <p className="text-center mt-5">Cargando órdenes...</p>;
 
@@ -88,7 +92,30 @@ const OrderList = () => {
             ))}
           </tbody>
         </table>
+
       </div>
+      {rellenos && (
+        <div className="mt-10">
+          <h2 className="text-lg font-bold mb-2">Rellenos Totales</h2>
+          <table className="w-full text-sm border border-gray-300 rounded-md overflow-hidden shadow-sm">
+            <thead className="bg-gray-200 text-gray-700">
+              <tr>
+                <th className="px-3 py-2 text-left">Tamaño</th>
+                <th className="px-3 py-2 text-left">Cantidad</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(rellenos).map(([medida, cantidad]) => (
+                <tr key={medida} className="border-t border-gray-200">
+                  <td className="px-3 py-2">{medida}</td>
+                  <td className="px-3 py-2">{cantidad}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
     </div>
   );
 };

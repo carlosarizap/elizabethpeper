@@ -1,6 +1,12 @@
 import { createOrder } from "@/app/lib/actions/order-actions";
 import { MARKETPLACES } from "@/app/lib/constants/marketplaces";
 import { NextResponse } from "next/server";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 function getFechaHaceDias(dias: number) {
   const fecha = new Date();
@@ -50,9 +56,19 @@ export async function GET() {
             (acc: number, item: any) => acc + parseFloat(item.priceAfterDiscounts?.toString() || "0"),
             0
           );
-        
+
           const totalQuantity = items.length;
-        
+
+          // 🔧 Ajustar hora de entrega a las 18:00 en zona horaria de Chile
+          const rawDate = subOrder.dispatchDate || new Date().toISOString();
+          const deliveryDate = dayjs(rawDate)
+            .tz("America/Santiago")
+            .set("hour", 18)
+            .set("minute", 0)
+            .set("second", 0)
+            .set("millisecond", 0)
+            .toDate();
+
           const result = await createOrder({
             orderId: `${subOrder.subOrderNumber}-G${groupIndex.toString().padStart(2, "0")}`,
             totalAmount,
@@ -60,13 +76,12 @@ export async function GET() {
             marketplace: MARKETPLACES.PARIS,
             productTitle: name,
             productQuantity: totalQuantity,
-            deliveryDate:  subOrder.dispatchDate || new Date().toISOString(),
+            deliveryDate: deliveryDate.toISOString(), // <-- esta es la fecha correcta
           });
-        
+
           insertedOrders.push(result);
           groupIndex++;
         }
-        
       }
     }
 

@@ -5,6 +5,6 @@ interface Order {
   status: string;
   product_title: string;
   product_quantity: number;
-  delivery_date: string; 
-  marketplace: string; 
+  delivery_date: string;
+  marketplace: string;
 }

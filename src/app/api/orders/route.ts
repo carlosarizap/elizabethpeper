@@ -6,6 +6,7 @@ export async function GET() {
     const orders = await fetchOrders(); // puedes añadir page/query si gustas
     return NextResponse.json(orders);
   } catch (error) {
+    console.error("Error", error);
     return NextResponse.json({ error: 'Error al cargar órdenes' }, { status: 500 });
   }
 }

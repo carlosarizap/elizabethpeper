@@ -5,13 +5,13 @@ import { NextResponse } from "next/server";
 function calcularFechaEntrega(dateCreated: string): string {
   const fecha = new Date(dateCreated);
   const hora = fecha.getHours();
-  let diasASumar = hora >= 18 ? 2 : 1;
+  const diasASumar = hora >= 18 ? 2 : 1;
 
   // Sumar días base
   fecha.setDate(fecha.getDate() + diasASumar);
 
   // Verificar si la fecha resultante cae en fin de semana
-  let diaEntrega = fecha.getDay(); // 0 = domingo, 6 = sábado
+  const diaEntrega = fecha.getDay(); // 0 = domingo, 6 = sábado
 
   if (diaEntrega === 6) {
     // Sábado → entregar lunes

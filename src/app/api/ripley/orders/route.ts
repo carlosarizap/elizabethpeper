@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 function calcularFechaEntrega(dateCreated: string): string {
   const fecha = new Date(dateCreated);
   const hora = fecha.getHours();
-  let diasASumar = hora >= 18 ? 2 : 1;
+  const diasASumar = hora >= 18 ? 2 : 1;
 
   fecha.setDate(fecha.getDate() + diasASumar);
 

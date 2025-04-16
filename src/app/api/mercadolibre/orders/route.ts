@@ -1,5 +1,6 @@
 import { createOrder } from "@/app/lib/actions/order-actions";
 import { MARKETPLACES } from "@/app/lib/constants/marketplaces";
+import { getValidAccessToken } from "@/app/lib/mercadolibre/token-manager";
 import { NextResponse } from "next/server";
 
 function calcularFechaEntrega(dateCreated: string): string {
@@ -25,8 +26,9 @@ function calcularFechaEntrega(dateCreated: string): string {
 }
 
 export async function GET() {
-  const token = process.env.MERCADO_LIBRE_ACCESS_TOKEN;
   const seller_id = process.env.MERCADO_LIBRE_SELLER_ID;
+
+  const token = await getValidAccessToken();
 
   if (!token) {
     return NextResponse.json({ error: "Falta token" }, { status: 400 });
@@ -63,7 +65,6 @@ export async function GET() {
 
     for (const order of orders) {
       if (order.status !== "paid") {
-        console.log(`Orden ${order.id} no está pagada (estado: ${order.status})`);
         continue;
       }
 

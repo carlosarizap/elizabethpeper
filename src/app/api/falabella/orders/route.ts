@@ -64,7 +64,6 @@ export async function GET() {
 
         const orders = data?.SuccessResponse?.Body?.Orders?.Order || [];
         const ordersArray = Array.isArray(orders) ? orders : [orders];
-        console.log("Órdenes originales recibidas de Falabella:", ordersArray);
 
         const insertedOrders = [];
 

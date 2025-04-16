@@ -1,0 +1,21 @@
+{
+    "cron": [
+      {
+        "path": "/api/mercadolibre/orders",
+        "schedule": "0,30 * * * *"
+      },
+      {
+        "path": "/api/falabella/orders",
+        "schedule": "2,32 * * * *"
+      },
+      {
+        "path": "/api/ripley/orders",
+        "schedule": "4,34 * * * *"
+      },
+      {
+        "path": "/api/paris/orders",
+        "schedule": "6,36 * * * *"
+      }
+    ]
+  }
+  

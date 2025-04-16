@@ -1,18 +1,21 @@
-[
-  {
-    "path": "/api/mercadolibre/orders",
-    "schedule": "0 22 * * *"
-  },
-  {
-    "path": "/api/falabella/orders",
-    "schedule": "2 22 * * *"
-  },
-  {
-    "path": "/api/ripley/orders",
-    "schedule": "4 22 * * *"
-  },
-  {
-    "path": "/api/paris/orders",
-    "schedule": "6 22 * * *"
-  }
-]
+{
+  "crons": [
+    {
+      "path": "/api/mercadolibre/orders",
+      "schedule": "0 22 * * *"
+    },
+    {
+      "path": "/api/falabella/orders",
+      "schedule": "2 22 * * *"
+    },
+    {
+      "path": "/api/ripley/orders",
+      "schedule": "4 22 * * *"
+    },
+    {
+      "path": "/api/paris/orders",
+      "schedule": "6 22 * * *"
+    }
+  ]
+  
+}

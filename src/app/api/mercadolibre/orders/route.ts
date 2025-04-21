@@ -30,7 +30,7 @@ function calcularFechaEntrega(dateCreated: string): string {
 export async function GET() {
   const seller_id = process.env.MERCADO_LIBRE_SELLER_ID;
 
-  const token = 'APP_USR-4517569887136095-042020-e0ccf92213451e02470caa5c9bb66a58-701769974';
+  const token = await getValidAccessToken();
 
   if (!token) {
     return NextResponse.json({ error: "Falta token" }, { status: 400 });

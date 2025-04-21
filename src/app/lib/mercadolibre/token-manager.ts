@@ -1,4 +1,5 @@
 import pool from "@/app/lib/db";
+import { CheckBadgeIcon } from "@heroicons/react/24/solid";
 
 const APP_ID = process.env.MERCADO_LIBRE_CLIENT_ID!;
 const SECRET = process.env.MERCADO_LIBRE_CLIENT_SECRET!;
@@ -22,6 +23,8 @@ export async function getValidAccessToken(): Promise<string> {
       Date.now() - new Date(tokenRow.updated_at).getTime() > 5.9 * 60 * 60 * 1000;
 
     if (!expirado) return tokenRow.access_token;
+
+     
 
     // Renovar token
     const res = await fetch("https://api.mercadolibre.com/oauth/token", {

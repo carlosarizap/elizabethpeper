@@ -5,31 +5,8 @@ import { MARKETPLACES } from "@/app/lib/constants/marketplaces";
 import { getValidAccessToken } from "@/app/lib/mercadolibre/token-manager";
 import { NextResponse } from "next/server";
 
-function calcularFechaEntrega(dateCreated: string): string {
-  const fecha = new Date(dateCreated);
-  const hora = fecha.getHours();
-  const diasASumar = hora >= 18 ? 2 : 1;
-
-  // Sumar días base
-  fecha.setDate(fecha.getDate() + diasASumar);
-
-  // Verificar si la fecha resultante cae en fin de semana
-  const diaEntrega = fecha.getDay(); // 0 = domingo, 6 = sábado
-
-  if (diaEntrega === 6) {
-    // Sábado → entregar lunes
-    fecha.setDate(fecha.getDate() + 2);
-  } else if (diaEntrega === 0) {
-    // Domingo → entregar lunes
-    fecha.setDate(fecha.getDate() + 1);
-  }
-
-  return fecha.toISOString();
-}
-
 export async function GET() {
   const seller_id = process.env.MERCADO_LIBRE_SELLER_ID;
-
   const token = await getValidAccessToken();
 
   if (!token) {
@@ -40,7 +17,7 @@ export async function GET() {
     console.log("Realizando solicitud a Mercado Libre...");
 
     const response = await fetch(
-      `https://api.mercadolibre.com/orders/search?seller=${seller_id}&sort=date_desc&limit=50`,
+      `https://api.mercadolibre.com/orders/search?seller=${seller_id}&sort=date_desc&limit=30`,
       {
         method: "GET",
         headers: {
@@ -66,14 +43,31 @@ export async function GET() {
     const insertedOrders = [];
 
     for (const order of orders) {
-      if (order.status !== "paid") {
-        continue;
-      }
+      if (order.status !== "paid") continue;
 
       const item = order.order_items?.[0]?.item;
       const quantity = order.order_items?.[0]?.quantity;
+      const shipmentId = order?.shipping?.id;
 
-      const deliveryDate = calcularFechaEntrega(order.date_created);
+      let slaFechaEntrega = null;
+
+      if (shipmentId) {
+        try {
+          const slaResponse = await fetch(`https://api.mercadolibre.com/shipments/${shipmentId}`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+
+          if (slaResponse.ok) {
+            const slaData = await slaResponse.json();
+            slaFechaEntrega = slaData?.shipping_option?.estimated_handling_limit?.date || null;
+          }
+        } catch (err) {
+          console.warn("No se pudo obtener fecha SLA para shipping", err);
+        }
+      }
+      
 
       const result = await createOrder({
         orderId: order.id.toString(),
@@ -82,10 +76,10 @@ export async function GET() {
         marketplace: MARKETPLACES.MERCADO_LIBRE,
         productTitle: item?.title ?? "Sin título",
         productQuantity: quantity ?? 1,
-        deliveryDate,
+        deliveryDate: slaFechaEntrega, // 🎯 usamos la fecha de SLA
       });
-
       insertedOrders.push(result);
+      
     }
 
     return NextResponse.json({ inserted: insertedOrders });

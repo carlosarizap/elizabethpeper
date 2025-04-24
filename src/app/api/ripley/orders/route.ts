@@ -34,7 +34,7 @@ export async function GET() {
   }
 
   try {
-    const startDate = getFechaHaceDias(7);
+    const startDate = getFechaHaceDias(4);
     const endDate = new Date().toISOString().split(".")[0];
 
     const response = await fetch(

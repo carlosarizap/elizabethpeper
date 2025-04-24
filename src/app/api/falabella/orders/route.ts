@@ -54,7 +54,7 @@ export async function GET() {
             Timestamp: timestamp,
             UserID: userId,
             Version: "1.0",
-            CreatedAfter: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7).toISOString(),
+            CreatedAfter: new Date(Date.now() - 1000 * 60 * 60 * 24 * 4).toISOString(),
         };
 
         const signature = calculateSignature(baseParams, apiKey);

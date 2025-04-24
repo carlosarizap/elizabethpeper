@@ -25,9 +25,8 @@ export async function GET() {
   }
 
   try {
-    const startDate = getFechaHaceDias(7);
-    const endDate = new Date().toISOString().split("T")[0];
-
+    const startDate = getFechaHaceDias(4);
+    const endDate = getFechaHaceDias(-1); // Esto suma 1 día
     const url = `https://api-developers.ecomm.cencosud.com/v1/orders?gteCreatedAt=${startDate}&lteCreatedAt=${endDate}&sellerId=${sellerId}`;
 
     const response = await fetch(url, {
@@ -43,6 +42,7 @@ export async function GET() {
 
     for (const order of orders) {
       for (const subOrder of order.subOrders) {
+
         const groupedByName = new Map<string, typeof subOrder.items>();
 
         for (const item of subOrder.items) {

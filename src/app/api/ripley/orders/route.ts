@@ -1,4 +1,4 @@
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+'use server';
 
 import { createOrder } from "@/app/lib/actions/order-actions";
 import { MARKETPLACES } from "@/app/lib/constants/marketplaces";
@@ -6,16 +6,11 @@ import { NextResponse } from "next/server";
 
 function calcularFechaEntrega(dateCreated: string): string {
   const fecha = new Date(dateCreated);
-  const diasASumar = 1;
-
-  fecha.setDate(fecha.getDate() + diasASumar);
+  fecha.setDate(fecha.getDate() + 1);
 
   const diaEntrega = fecha.getDay();
-  if (diaEntrega === 6) {
-    fecha.setDate(fecha.getDate() + 2);
-  } else if (diaEntrega === 0) {
-    fecha.setDate(fecha.getDate() + 1);
-  }
+  if (diaEntrega === 6) fecha.setDate(fecha.getDate() + 2);
+  if (diaEntrega === 0) fecha.setDate(fecha.getDate() + 1);
 
   return fecha.toISOString();
 }
@@ -49,20 +44,28 @@ export async function GET() {
 
     const data = await response.json();
     const orders = data.orders || [];
-
     const insertedOrders = [];
 
     for (const order of orders) {
+      const deliveryDate = calcularFechaEntrega(order.created_date);
+      const orderId = order.order_id; // ⚡ solo antes del guión
+      const shippingAmount = parseFloat(order.shipping_price ?? '0') || 0;
+
       for (const line of order.order_lines) {
-        const deliveryDate = calcularFechaEntrega(order.created_date);
+        const productTitle = line.product_title ?? "Sin título";
+        const quantity = line.quantity ?? 1;
+        const price = parseFloat(line.price ?? '0') || 0;
+
 
         const result = await createOrder({
-          orderId: `${order.order_id}-${line.order_line_id}`,
-          totalAmount: line.total_price,
+          orderId: orderId,
+          shippingAmount: shippingAmount,
           status: line.order_line_state,
           marketplace: MARKETPLACES.RIPLEY,
-          productTitle: line.product_title ?? "Sin título",
-          productQuantity: line.quantity ?? 1,
+          documentType: 'boleta', // siempre boleta
+          productTitle,
+          productQuantity: quantity,
+          productPrice: price / quantity, // precio unitario
           deliveryDate,
         });
 

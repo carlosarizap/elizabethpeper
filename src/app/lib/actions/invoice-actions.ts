@@ -1,6 +1,9 @@
 import { Builder, By, until, Key } from 'selenium-webdriver';
 import chrome, { ServiceBuilder } from 'selenium-webdriver/chrome';
 import pool from '@/app/lib/db';
+import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
 
 const numpadMap: { [key: string]: string } = {
     '0': Key.NUMPAD0,
@@ -76,7 +79,7 @@ export async function generateInvoices() {
             }
 
             // Enviar monto con numpad
-            const montoStr = "1";
+            const montoStr = order.total_amount.toString();
             const montoTeclas = montoStr.split('').map((d: string) => numpadMap[d]);
             await driver.actions({ async: true }).sendKeys(...montoTeclas).perform();
 
@@ -129,24 +132,55 @@ export async function generateInvoices() {
             const detalleInput = await driver.findElement(By.xpath('//input[@id="input-139"]'));
             await detalleInput.sendKeys(descripcion);
 
-            await driver.sleep(1000); // dar tiempo para que se muestre el campo
+            await driver.sleep(2000); // dar tiempo para que se muestre el campo
             console.log(`Boleta lista para orden ${order.order_id} (detenida antes de emitir).`);
             // Esperar botón final "Emitir"
             // Esperar el DIV contenedor del botón "EMITIR"
-            const botonFinalEmitir = await driver.wait(
-                until.elementLocated(By.xpath('//button[.//span[text()[normalize-space(.) = "EMITIR"]]')),
-                10000
-            );
-            await driver.executeScript('arguments[0].scrollIntoView({ behavior: "smooth", block: "center" });', botonFinalEmitir);
-            await driver.sleep(500); // Espera la animación
-            await driver.executeScript('arguments[0].click();', botonFinalEmitir);
-            
+            // Presionar TAB una sola vez para mover el foco al botón "Emitir"
+            await driver.actions({ async: true }).sendKeys(Key.TAB).perform();
+            await driver.sleep(300); // espera leve por seguridad
+
+            // Luego presionar ENTER para activarlo
+            await driver.actions({ async: true }).sendKeys(Key.ENTER).perform();
+            await driver.sleep(2000); // esperar a que procese
             await driver.wait(
                 until.elementLocated(By.xpath('//div[contains(text(), "Boleta generada")]')),
                 15000
             );
-            
             console.log(`✅ Boleta emitida para orden ${order.order_id}.`);
+
+            // 🔍 Capturar el enlace de descarga SIN usar el click
+            const downloadBtn = await driver.findElement(By.xpath('//a[contains(., "Descargar")]'));
+            const downloadUrl = await downloadBtn.getAttribute('href');
+
+            if (!downloadUrl) {
+                console.error(`❌ No se encontró enlace de descarga para orden ${order.order_id}`);
+                continue;
+            }
+
+            // 📥 Descargar el PDF desde el enlace directamente en memoria
+            const response = await axios.get(downloadUrl, { responseType: 'arraybuffer' });
+            const pdfBuffer = Buffer.from(response.data);
+
+            // 🧠 Guardar el PDF en la base de datos
+            await client.query(
+                'UPDATE orders SET boleta_pdf = $1, has_invoice = true WHERE order_id = $2',
+                [pdfBuffer, order.order_id]
+            );
+
+            console.log(`📂 Boleta guardada en la base de datos para orden ${order.order_id}`);
+
+            // 7. Cerrar boleta y volver al inicio presionando la X
+            try {
+                const closeBtn = await driver.wait(
+                    until.elementLocated(By.xpath('//i[contains(text(), "close")]')),
+                    10000
+                );
+                await closeBtn.click();
+                await driver.sleep(2000); // espera a que cargue la pantalla de inicio
+            } catch (e) {
+                console.error('❌ No se pudo cerrar la boleta actual con la X:', e);
+            }
 
         }
 

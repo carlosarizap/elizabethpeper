@@ -34,21 +34,20 @@ export async function GET() {
     }
 
     const data = await response.json();
-    const orders = data.results;
 
+    const orders = data.results;
+    
     if (!orders || orders.length === 0) {
       return NextResponse.json({ error: "No se encontraron órdenes" }, { status: 404 });
     }
-
+    
     const insertedOrders = [];
-
+    
     for (const order of orders) {
       if (order.status !== "paid") continue;
 
-      const item = order.order_items?.[0]?.item;
-      const quantity = order.order_items?.[0]?.quantity;
+      const orderOrPackId = order.pack_id ? order.pack_id.toString() : order.id.toString(); // ⚡️ Prioridad pack_id
       const shipmentId = order?.shipping?.id;
-
       let slaFechaEntrega = null;
 
       if (shipmentId) {
@@ -67,22 +66,30 @@ export async function GET() {
           console.warn("No se pudo obtener fecha SLA para shipping", err);
         }
       }
-      
 
-      const result = await createOrder({
-        orderId: order.id.toString(),
-        totalAmount: order.total_amount,
-        status: order.status,
-        marketplace: MARKETPLACES.MERCADO_LIBRE,
-        productTitle: item?.title ?? "Sin título",
-        productQuantity: quantity ?? 1,
-        deliveryDate: slaFechaEntrega, // 🎯 usamos la fecha de SLA
-      });
-      insertedOrders.push(result);
-      
+      for (const item of order.order_items ?? []) {
+        const productTitle = item?.item?.title ?? "Sin título";
+        const quantity = item?.quantity ?? 1;
+        const unitPrice = item?.unit_price ?? 0;
+
+        const result = await createOrder({
+          orderId: orderOrPackId,
+          shippingAmount: 0,
+          status: order.status,
+          marketplace: MARKETPLACES.MERCADO_LIBRE,
+          documentType: "boleta",
+          productTitle,
+          productQuantity: quantity,
+          productPrice: unitPrice,
+          deliveryDate: slaFechaEntrega,
+        });
+
+        insertedOrders.push(result);
+      }
     }
 
     return NextResponse.json({ inserted: insertedOrders });
+
   } catch (error) {
     console.error("Error en la API:", error);
     return NextResponse.json(

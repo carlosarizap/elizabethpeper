@@ -1,4 +1,5 @@
-'use server';
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
 
 import { createOrder } from "@/app/lib/actions/order-actions";
 import { MARKETPLACES } from "@/app/lib/constants/marketplaces";

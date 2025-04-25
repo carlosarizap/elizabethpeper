@@ -3,13 +3,14 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { Marketplace } from "../lib/constants/marketplaces";
 import { ArrowPathIcon } from "@heroicons/react/24/solid";
+import { OrderHeader } from "../lib/definitions/order_header";
 
 const getMarketplaceLogo = (marketplace: Marketplace) => {
   return `/marketplaces/${marketplace}.png`;
 };
 
 const OrderList = () => {
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<OrderHeader[]>([]);
   const [rellenos, setRellenos] = useState<Record<string, number>>({});
 
   const [loading, setLoading] = useState(true);
@@ -61,7 +62,7 @@ const OrderList = () => {
       {/* Logo y botón */}
       <div className="flex justify-between items-center mb-6 px-4 sm:px-0">
         <h1 className="text-lg font-bold mb-2 print:hidden">
-           ELIZABETH PEPER
+          ELIZABETH PEPER
         </h1>
         <Image
           src="/logo.png"
@@ -97,33 +98,34 @@ const OrderList = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 print:divide-gray-400">
-            {orders.map((order, index) => (
-              <tr
-                key={order.id}
-                className={`${index % 2 === 0 ? "bg-white print:bg-white" : "bg-gray-50 print:bg-gray-100"
-                  } border-t border-gray-200 print:border-gray-400 print:text-xs print:h-[20px]`}
-              >
-                <td className="px-2 py-1 print:py-0.5">{order.product_quantity}</td>
-                <td className="px-2 py-1 print:py-0.5">{order.product_title}</td>
-                <td className="px-2 py-1 print:py-0.5">
-                  <Image
-                    src={getMarketplaceLogo(order.marketplace as Marketplace)}
-                    alt={order.marketplace}
-                    width={80}
-                    height={24}
-                    className="object-contain h-[18px] mx-auto"
-                  />
-                </td>
-                <td className="px-2 py-1 print:py-0.5">
-                  {new Date(order.delivery_date.split("T")[0] + "T12:00:00Z").toLocaleDateString("es-CL", {
-                    weekday: "long",
-                    day: "numeric",
-                  })}
-                </td>
-                <td className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5"><input type="checkbox" /></td>
-                <td className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5"><input type="checkbox" /></td>
-                <td className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5"><input type="checkbox" /></td>
-              </tr>
+            {orders.map((orderHeader) => (
+               (orderHeader.details ?? []).map((detail, index) => (
+                <tr
+                  key={detail.id}
+                  className={`${index % 2 === 0 ? "bg-white print:bg-white" : "bg-gray-50 print:bg-gray-100"} border-t border-gray-200 print:border-gray-400 print:text-xs print:h-[20px]`}
+                >
+                  <td className="px-2 py-1 print:py-0.5">{detail.product_quantity}</td>
+                  <td className="px-2 py-1 print:py-0.5">{detail.product_title}</td>
+                  <td className="px-2 py-1 print:py-0.5">
+                    <Image
+                      src={getMarketplaceLogo(orderHeader.marketplace as Marketplace)}
+                      alt={orderHeader.marketplace}
+                      width={80}
+                      height={24}
+                      className="object-contain h-[18px] mx-auto"
+                    />
+                  </td>
+                  <td className="px-2 py-1 print:py-0.5">
+                    {new Date(orderHeader.delivery_date.split("T")[0] + "T12:00:00Z").toLocaleDateString("es-CL", {
+                      weekday: "long",
+                      day: "numeric",
+                    })}
+                  </td>
+                  <td className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5"><input type="checkbox" /></td>
+                  <td className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5"><input type="checkbox" /></td>
+                  <td className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5"><input type="checkbox" /></td>
+                </tr>
+              ))
             ))}
           </tbody>
         </table>

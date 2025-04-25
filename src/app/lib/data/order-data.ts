@@ -1,7 +1,7 @@
 import pool from '@/app/lib/db';
 import { unstable_noStore as noStore } from 'next/cache';
+import { OrderHeader } from '../definitions/order_header';
 
-// Optional pagination constant
 const ITEMS_PER_PAGE = 50;
 
 export async function fetchOrders(page: number = 1, query: string = '') {
@@ -10,22 +10,33 @@ export async function fetchOrders(page: number = 1, query: string = '') {
     const offset = (page - 1) * ITEMS_PER_PAGE;
     const client = await pool.connect();
 
-    const result = await client.query<Order>(
+    const result = await client.query(
       `SELECT 
-        id,
-        order_id,
-        total_amount,
-        status,
-        product_title,
-        product_quantity,
-        marketplace,
-        delivery_date
-      FROM orders
+        oh.id AS id,
+        oh.order_id,
+        oh.total_amount,
+        oh.shipping_amount,
+        oh.document_type,
+        oh.has_invoice,
+        oh.invoice_pdf,
+        oh.status,
+        oh.marketplace,
+        oh.delivery_date,
+        oh.created_at AS header_created_at,
+        oh.updated_at AS header_updated_at,
+        od.id AS detail_id,
+        od.product_title,
+        od.product_quantity,
+        od.product_price,
+        od.created_at AS detail_created_at,
+        od.updated_at AS detail_updated_at
+      FROM order_header oh
+      JOIN order_detail od ON oh.id = od.id_order_header
       WHERE 
-        (product_title ILIKE $1 OR
-        status ILIKE $1 OR
-        order_id::TEXT ILIKE $1) AND
-        delivery_date::date >= (
+        (od.product_title ILIKE $1 OR
+         oh.status ILIKE $1 OR
+         oh.order_id::TEXT ILIKE $1) AND
+        oh.delivery_date::date >= (
           CASE 
             WHEN CURRENT_TIME >= TIME '18:00'
             THEN CURRENT_DATE + 1
@@ -34,37 +45,66 @@ export async function fetchOrders(page: number = 1, query: string = '') {
         )
       ORDER BY 
         CASE 
-          WHEN marketplace = 'mercado_libre' THEN 1
-          WHEN marketplace = 'falabella' THEN 2
-          WHEN marketplace = 'ripley' THEN 3
-          WHEN marketplace = 'paris' THEN 4
+          WHEN oh.marketplace = 'mercado_libre' THEN 1
+          WHEN oh.marketplace = 'falabella' THEN 2
+          WHEN oh.marketplace = 'ripley' THEN 3
+          WHEN oh.marketplace = 'paris' THEN 4
           ELSE 5
         END,
-        delivery_date ASC
+        oh.delivery_date ASC
       LIMIT $2 OFFSET $3`,
       [`%${query}%`, ITEMS_PER_PAGE, offset]
     );
 
-    // Agrupar rellenos
     const rellenos: Record<string, number> = {};
+    const headersMap = new Map<string, OrderHeader>();
 
-    for (const order of result.rows) {
-      const title = order.product_title.toLowerCase();
-
+    for (const row of result.rows) {
+      const title = row.product_title?.toLowerCase() || '';
       if (title.includes("relleno")) {
-        const match = title.match(/(\d{2}x\d{2})/); // Ej: 45x45, 50x50
-
+        const match = title.match(/(\d{2}x\d{2})/);
         if (match) {
-          const medida = match[1]; // Ej: "50x50"
+          const medida = match[1];
           if (!rellenos[medida]) rellenos[medida] = 0;
-          rellenos[medida] += order.product_quantity;
+          rellenos[medida] += row.product_quantity;
         }
       }
+
+      if (!headersMap.has(row.id)) {
+        headersMap.set(row.id, {
+          id: row.id,
+          order_id: row.order_id,
+          total_amount: row.total_amount,
+          shipping_amount: row.shipping_amount || 0,
+          document_type: row.document_type || 'boleta',
+          has_invoice: row.has_invoice || false,
+          invoice_pdf: row.invoice_pdf || null,
+          marketplace: row.marketplace,
+          status: row.status,
+          delivery_date: row.delivery_date,
+          created_at: row.header_created_at,
+          updated_at: row.header_updated_at,
+          details: [],
+        });
+      }
+
+      headersMap.get(row.id)?.details.push({
+        id: row.detail_id,
+        id_order_header: row.id,
+        product_title: row.product_title,
+        product_quantity: row.product_quantity,
+        product_price: row.product_price,
+        created_at: row.detail_created_at,
+        updated_at: row.detail_updated_at,
+      });
     }
 
-
     client.release();
-    return { orders: result.rows, rellenos };
+
+    return {
+      orders: Array.from(headersMap.values()),
+      rellenos,
+    };
 
   } catch (error) {
     console.error('Database Error fetching orders:', error);
@@ -77,23 +117,26 @@ export async function fetchOrderById(id: string) {
   try {
     const client = await pool.connect();
 
-    const result = await client.query<Order>(
+    const result = await client.query(
       `SELECT 
-        id,
-        order_id,
-        total_amount,
-        status,
-        product_title,
-        product_quantity,
-        marketplace,
-        delivery_date
-      FROM orders
-      WHERE id = $1`,
+        oh.id AS id,
+        oh.order_id,
+        oh.total_amount,
+        oh.status,
+        od.product_title,
+        od.product_quantity,
+        od.product_price,
+        oh.marketplace,
+        oh.delivery_date
+      FROM order_header oh
+      JOIN order_detail od ON oh.id = od.id_order_header
+      WHERE oh.id = $1`,
       [id]
     );
 
     client.release();
-    return result.rows[0];
+    return result.rows;
+
   } catch (error) {
     console.error('Database Error fetching order by ID:', error);
     throw new Error('Failed to fetch order.');

@@ -74,7 +74,8 @@ export async function generateInvoices() {
                 await driver.sleep(100);
             }
 
-            const montoTotal = header.total_amount.toFixed(0) + header.shipping_ammount.toFixed(0);
+            const montoTotal = (header.total_amount + header.shipping_amount).toFixed(0).toString();
+            //const montoTotal = "1";
             const montoTeclas = montoTotal.split('').map((d: string) => numpadMap[d]);
             await driver.actions({ async: true }).sendKeys(...montoTeclas).perform();
 

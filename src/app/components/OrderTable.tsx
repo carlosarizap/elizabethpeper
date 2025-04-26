@@ -13,7 +13,7 @@ const getMarketplaceLogo = (marketplace: Marketplace) => {
 
 const OrderTable = ({ orders }: Props) => {
     return (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mb-7">
             <table className="w-full text-sm border border-gray-300 rounded-md overflow-hidden shadow-sm text-black">
                 <thead className="bg-gray-200 text-gray-700">
                     <tr>
@@ -71,7 +71,7 @@ const OrderTable = ({ orders }: Props) => {
                                         <ul className="list-disc pl-6">
                                             {order.details.map((detail) => (
                                                 <li key={detail.id}>
-                                                    {detail.product_quantity} x {detail.product_title}
+                                                    {detail.product_quantity} - {detail.product_title}
                                                 </li>
                                             ))}
                                         </ul>

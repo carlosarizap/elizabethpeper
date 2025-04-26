@@ -25,7 +25,7 @@ export async function GET() {
   }
 
   try {
-    const startDate = getFechaHaceDias(20);
+    const startDate = getFechaHaceDias(4);
     const endDate = getFechaHaceDias(-1);
     const url = `https://api-developers.ecomm.cencosud.com/v1/orders?gteCreatedAt=${startDate}&lteCreatedAt=${endDate}&sellerId=${sellerId}`;
 

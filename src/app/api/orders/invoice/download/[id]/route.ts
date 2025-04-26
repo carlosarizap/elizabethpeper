@@ -1,7 +1,10 @@
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
 import { getOrderInvoiceById } from '@/app/lib/data/order-data';
 import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const { id } = params;
 
   try {

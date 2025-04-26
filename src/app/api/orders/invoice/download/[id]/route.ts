@@ -1,13 +1,16 @@
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 import { getOrderInvoiceById } from '@/app/lib/data/order-data';
-import { NextResponse } from 'next/server';
-import { NextRequest } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
-  const { id } = params;
-
+export async function GET(request: NextRequest) {
   try {
+    const id = request.nextUrl.pathname.split('/').pop(); // 👈 Obtenemos el id del URL dinámicamente
+
+    if (!id) {
+      return new NextResponse('ID de orden no especificado', { status: 400 });
+    }
+
     const pdfBuffer = await getOrderInvoiceById(id);
 
     if (!pdfBuffer) {

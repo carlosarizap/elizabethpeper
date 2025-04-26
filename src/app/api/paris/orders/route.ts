@@ -26,7 +26,7 @@ export async function GET() {
 
   try {
     const startDate = getFechaHaceDias(4);
-    const endDate = getFechaHaceDias(-1); // Esto suma 1 día
+    const endDate = getFechaHaceDias(-1);
     const url = `https://api-developers.ecomm.cencosud.com/v1/orders?gteCreatedAt=${startDate}&lteCreatedAt=${endDate}&sellerId=${sellerId}`;
 
     const response = await fetch(url, {
@@ -42,47 +42,47 @@ export async function GET() {
 
     for (const order of orders) {
       for (const subOrder of order.subOrders) {
+        const shippingAmount = parseFloat(subOrder.cost ?? '0') || 0;
 
-        const groupedByName = new Map<string, typeof subOrder.items>();
+        const deliveryDate = dayjs(subOrder.dispatchDate || new Date().toISOString())
+          .tz("America/Santiago")
+          .set("hour", 18)
+          .set("minute", 0)
+          .set("second", 0)
+          .set("millisecond", 0)
+          .toISOString();
+
+        const documentType = (order.originInvoiceType?.toLowerCase() === 'factura') ? 'factura' : 'boleta';
+
+        // ⚡ Agrupar items por nombre
+        const groupedItems = new Map<string, any[]>();
 
         for (const item of subOrder.items) {
           const key = item?.name || "Sin título";
-          if (!groupedByName.has(key)) groupedByName.set(key, []);
-          groupedByName.get(key)!.push(item);
+          if (!groupedItems.has(key)) groupedItems.set(key, []);
+          groupedItems.get(key)!.push(item);
         }
 
-        let groupIndex = 1;
-
-        for (const [name, items] of groupedByName.entries()) {
+        for (const [name, items] of groupedItems.entries()) {
           const totalAmount = items.reduce(
-            (acc: number, item: any) => acc + parseFloat(item.priceAfterDiscounts?.toString() || "0"),
+            (acc, item) => acc + parseFloat(item.priceAfterDiscounts?.toString() || '0'),
             0
           );
-
           const totalQuantity = items.length;
 
-          // 🔧 Ajustar hora de entrega a las 18:00 en zona horaria de Chile
-          const rawDate = subOrder.dispatchDate || new Date().toISOString();
-          const deliveryDate = dayjs(rawDate)
-            .tz("America/Santiago")
-            .set("hour", 18)
-            .set("minute", 0)
-            .set("second", 0)
-            .set("millisecond", 0)
-            .toDate();
-
           const result = await createOrder({
-            orderId: `${subOrder.subOrderNumber}-G${groupIndex.toString().padStart(2, "0")}`,
-            totalAmount,
-            status: items[0]?.status?.name || "unknown",
+            orderId: subOrder.subOrderNumber, // solo subOrderNumber
+            shippingAmount,
+            status: items[0]?.status?.name || subOrder.status?.name || "unknown",
             marketplace: MARKETPLACES.PARIS,
+            documentType: documentType as 'boleta' | 'factura',
             productTitle: name,
             productQuantity: totalQuantity,
-            deliveryDate: deliveryDate.toISOString(), // <-- esta es la fecha correcta
+            productPrice: totalAmount / totalQuantity, // ⚡ para guardar el precio unitario
+            deliveryDate,
           });
 
           insertedOrders.push(result);
-          groupIndex++;
         }
       }
     }

@@ -4,53 +4,105 @@ import pool from '@/app/lib/db';
 
 export async function createOrder(order: {
   orderId: string;
-  totalAmount: number;
+  shippingAmount?: number;
   status: string;
   marketplace?: string;
+  documentType?: 'boleta' | 'factura';
   productTitle: string;
   productQuantity: number;
+  productPrice: number;
   deliveryDate?: string; 
 }) {
   try {
     const client = await pool.connect();
 
+    // Verificar si ya existe un header con el mismo orderId
     const exists = await client.query(
-      'SELECT 1 FROM orders WHERE order_id = $1',
+      'SELECT id FROM order_header WHERE order_id = $1',
       [order.orderId]
     );
 
+    let orderHeaderId: string;
+
     if ((exists.rowCount ?? 0) > 0) {
-      client.release();
-      return { message: 'Orden ya existe' };
+      orderHeaderId = exists.rows[0].id;
+    } else {
+      const totalInicial = order.productQuantity * order.productPrice;
+      const insertHeader = await client.query(
+        `
+        INSERT INTO order_header (
+          order_id, 
+          total_amount, 
+          shipping_amount, 
+          status, 
+          marketplace, 
+          document_type,
+          has_invoice,
+          delivery_date
+        ) 
+        VALUES ($1, $2, $3, $4, $5, $6, false, $7)
+        RETURNING id
+        `,
+        [
+          order.orderId,
+          totalInicial,
+          order.shippingAmount ?? 0,
+          order.status,
+          order.marketplace ?? 'mercado_libre',
+          order.documentType ?? 'boleta',
+          order.deliveryDate ?? null
+        ]
+      );
+
+      orderHeaderId = insertHeader.rows[0].id;
     }
 
-    const insert = await client.query(
-      `
-      INSERT INTO orders (
-        order_id, 
-        total_amount, 
-        status, 
-        marketplace, 
-        product_title, 
-        product_quantity, 
-        delivery_date
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING *
-    `,
-      [
-        order.orderId,
-        order.totalAmount,
-        order.status,
-        order.marketplace ?? 'mercado_libre',
-        order.productTitle,
-        order.productQuantity,
-        order.deliveryDate ?? null, // puede ser null si no hay fecha
-      ]
+    // ⚡ Verificar si ya existe ese detalle
+    const existsDetail = await client.query(
+      `SELECT 1 FROM order_detail WHERE id_order_header = $1 AND product_title = $2 AND product_quantity = $3`,
+      [orderHeaderId, order.productTitle, order.productQuantity]
     );
 
+    const repeated = (existsDetail.rowCount ?? 0) > 0;
+
+    if (!repeated) {
+      // Insertar detalle solo si no existe
+      await client.query(
+        `
+        INSERT INTO order_detail (
+          id_order_header, 
+          product_title, 
+          product_quantity,
+          product_price
+        ) 
+        VALUES ($1, $2, $3, $4)
+        `,
+        [
+          orderHeaderId,
+          order.productTitle,
+          order.productQuantity,
+          order.productPrice
+        ]
+      );
+
+      // 🧮 Actualizar el total_amount del header sumando todos los detalles actuales
+      await client.query(
+        `
+        UPDATE order_header
+        SET total_amount = (
+          SELECT COALESCE(SUM(product_quantity * product_price), 0)
+          FROM order_detail
+          WHERE id_order_header = $1
+        )
+        WHERE id = $1
+        `,
+        [orderHeaderId]
+      );
+    }
+
     client.release();
-    return insert.rows[0];
+    return { success: true, repeated };
+
   } catch (error) {
     console.error('Error al crear orden:', error);
     return { error: 'Error al crear orden' };

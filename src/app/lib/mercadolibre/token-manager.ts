@@ -8,8 +8,6 @@ const SECRET = process.env.MERCADO_LIBRE_CLIENT_SECRET!;
 
 export async function getValidAccessToken(): Promise<string> {
   const client = await pool.connect();
-  console.log("CLIENT_ID:", APP_ID);
-  console.log("CLIENT_SECRET:", SECRET);
   try {
     const { rows } = await client.query(`
       SELECT * FROM mercadolibre_tokens

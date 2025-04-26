@@ -6,6 +6,7 @@ import { fetchOrders } from '@/app/lib/data/order-data'; // o donde tengas ese m
 export async function GET() {
   try {
     const orders = await fetchOrders(); // puedes añadir page/query si gustas
+    
     return NextResponse.json(orders);
   } catch (error) {
     console.error("Error", error);

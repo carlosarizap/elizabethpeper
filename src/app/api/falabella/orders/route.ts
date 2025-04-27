@@ -70,7 +70,7 @@ export async function GET() {
     const insertedOrders = [];
 
     for (const order of ordersArray) {
-      const orderNumber = order.OrderNumber?.toString(); // para guardar
+      const orderNumber = order.OrderNumber?.toString() + "-" + order.OrderId?.toString(); // para guardar
       const orderId = order.OrderId?.toString();         // para consultar productos
       const documentType = order.InvoiceRequired === "true" ? "factura" : "boleta";
       const shippingAmount = parseFloat((order.ShippingFeeTotal ?? '0').replace(',', '')) || 0;

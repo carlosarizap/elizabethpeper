@@ -143,11 +143,62 @@ export async function fetchOrderById(id: string) {
   }
 }
 
-export async function fetchAllOrders(page: number = 1, query: string = '') {
+export async function fetchAllOrders(
+  page: number = 1,
+  query: string = '',
+  marketplace: string = '',
+  documentType: string = '',
+  deliveryDate: string = '',
+  startDate: string = '',
+  endDate: string = '',
+  hasInvoice: string = ''
+) {
   noStore();
   try {
     const offset = (page - 1) * ITEMS_PER_PAGE;
     const client = await pool.connect();
+
+    let filters = [];
+    let params = [];
+    let idx = 1;
+
+    if (query) {
+      filters.push(`(oh.order_id::TEXT ILIKE $${idx} OR od.product_title ILIKE $${idx})`);
+      params.push(`%${query}%`);
+      idx++;
+    }
+    if (marketplace) {
+      filters.push(`oh.marketplace = $${idx}`);
+      params.push(marketplace);
+      idx++;
+    }
+    if (documentType) {
+      filters.push(`oh.document_type = $${idx}`);
+      params.push(documentType);
+      idx++;
+    }
+    if (deliveryDate) {
+      filters.push(`oh.delivery_date::date = $${idx}`);
+      params.push(deliveryDate);
+      idx++;
+    }
+    if (startDate) {
+      filters.push(`oh.created_at::date >= $${idx}`);
+      params.push(startDate);
+      idx++;
+    }
+    if (endDate) {
+      filters.push(`oh.created_at::date <= $${idx}`);
+      params.push(endDate);
+      idx++;
+    }
+    if (hasInvoice) {
+      filters.push(`oh.has_invoice = $${idx}`);
+      params.push(hasInvoice === "true"); // convierte a boolean
+      idx++;
+    }
+
+    const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
 
     const result = await client.query(
       `SELECT 
@@ -171,14 +222,10 @@ export async function fetchAllOrders(page: number = 1, query: string = '') {
         od.updated_at AS detail_updated_at
       FROM order_header oh
       JOIN order_detail od ON oh.id = od.id_order_header
-      WHERE 
-        (od.product_title ILIKE $1 OR
-         oh.status ILIKE $1 OR
-         oh.order_id::TEXT ILIKE $1) 
-      ORDER BY 
-        oh.created_at DESC
-      LIMIT $2 OFFSET $3`,
-      [`%${query}%`, ITEMS_PER_PAGE, offset]
+      ${whereClause}
+      ORDER BY oh.created_at DESC
+      LIMIT $${idx} OFFSET $${idx + 1}`,
+      [...params, ITEMS_PER_PAGE, offset]
     );
 
     const headersMap = new Map<string, OrderHeader>();
@@ -224,7 +271,6 @@ export async function fetchAllOrders(page: number = 1, query: string = '') {
     throw new Error('Failed to fetch all orders.');
   }
 }
-
 export async function getOrderInvoiceById(orderId: string): Promise<Buffer | null> {
   const client = await pool.connect();
 

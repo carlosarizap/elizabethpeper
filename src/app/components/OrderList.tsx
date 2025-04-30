@@ -91,6 +91,7 @@ const OrderList = () => {
               <th className="px-2 py-1 text-left print:py-0.5">CANT</th>
               <th className="px-2 py-1 text-left print:py-0.5">PRODUCTO</th>
               <th className="px-2 py-1 text-left print:py-0.5">MARKETPLACE</th>
+              <th className="px-2 py-1 text-left print:py-0.5">CÓDIGO</th>
               <th className="px-2 py-1 text-left print:py-0.5">ENTREGA</th>
               <th className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5">C</th>
               <th className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5">P</th>
@@ -115,6 +116,7 @@ const OrderList = () => {
                       className="object-contain h-[18px] mx-auto"
                     />
                   </td>
+                  <td className="px-2 py-1 print:py-0.5">{orderHeader.order_id.split("-")[0]}</td>
                   <td className="px-2 py-1 print:py-0.5">
                     {new Date(orderHeader.delivery_date.split("T")[0] + "T12:00:00Z").toLocaleDateString("es-CL", {
                       weekday: "long",

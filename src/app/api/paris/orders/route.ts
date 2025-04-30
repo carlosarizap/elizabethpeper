@@ -50,7 +50,7 @@ export async function GET() {
           .set("minute", 0)
           .set("second", 0)
           .set("millisecond", 0)
-          .toISOString();
+          .format("YYYY-MM-DD"); // <-- Aquí se mantiene como fecha local
 
         const documentType = (order.originInvoiceType?.toLowerCase() === 'factura') ? 'factura' : 'boleta';
 

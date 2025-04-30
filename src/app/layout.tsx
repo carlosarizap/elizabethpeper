@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Elizabeth Peper - Órdenes",
+  title: "Elizabeth Peper",
 
 };
 

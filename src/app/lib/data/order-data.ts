@@ -292,3 +292,67 @@ export async function getOrderInvoiceById(orderId: string): Promise<Buffer | nul
     client.release();
   }
 }
+
+export async function fetchOrderStatsByMonth(year: number, month: number) {
+  const client = await pool.connect();
+
+  try {
+    // Totales por marketplace
+    const result = await client.query(`
+      SELECT 
+        oh.marketplace,
+        SUM(oh.total_amount) AS total_ventas,
+        COUNT(*) AS total_ordenes
+      FROM order_header oh
+      WHERE EXTRACT(YEAR FROM oh.created_at) = $1 AND EXTRACT(MONTH FROM oh.created_at) = $2
+      GROUP BY oh.marketplace
+    `, [year, month]);
+
+    // Top 5 productos más vendidos
+    const topProductsQuery = await client.query(`
+      SELECT 
+        od.product_title,
+        SUM(od.product_quantity) AS cantidad_total
+      FROM order_detail od
+      JOIN order_header oh ON od.id_order_header = oh.id
+      WHERE EXTRACT(YEAR FROM oh.created_at) = $1 AND EXTRACT(MONTH FROM oh.created_at) = $2
+      GROUP BY od.product_title
+      ORDER BY cantidad_total DESC
+      LIMIT 5
+    `, [year, month]);
+
+    // Rellenos vendidos por medida (detecta medidas tipo 90x190, 150x200, etc.)
+    const rellenosQuery = await client.query(`
+      SELECT 
+        REGEXP_MATCHES(LOWER(od.product_title), '(\\d{2,3}x\\d{2,3})') AS medida,
+        SUM(od.product_quantity) AS cantidad
+      FROM order_detail od
+      JOIN order_header oh ON od.id_order_header = oh.id
+      WHERE 
+        EXTRACT(YEAR FROM oh.created_at) = $1 AND 
+        EXTRACT(MONTH FROM oh.created_at) = $2 AND 
+        LOWER(od.product_title) LIKE '%relleno%'
+      GROUP BY medida
+    `, [year, month]);
+
+    // Mapear rellenos a objeto clave-valor
+    const rellenos: Record<string, number> = {};
+    for (const row of rellenosQuery.rows) {
+      const medida = row.medida?.[0]; // REGEXP_MATCHES devuelve array
+      if (medida) {
+        rellenos[medida] = parseInt(row.cantidad);
+      }
+    }
+
+    return {
+      marketplaces: result.rows,
+      topProducts: topProductsQuery.rows,
+      rellenos,
+    };
+  } catch (error) {
+    console.error('Error fetching stats by month:', error);
+    throw new Error('Failed to fetch stats by month');
+  } finally {
+    client.release();
+  }
+}

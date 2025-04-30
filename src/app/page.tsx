@@ -1,6 +1,10 @@
+import { Metadata } from "next";
 import OrderList from "./components/OrderList";
 
+export const metadata: Metadata = {
+  title: "Elizabeth Peper - Órdenes",
 
+};
 
 export default function Home() {
   return (

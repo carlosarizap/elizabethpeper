@@ -32,7 +32,7 @@ export default function Navbar() {
   const pathname = usePathname();
 
   return (
-    <nav className="bg-white shadow-md border-b px-6 py-3">
+    <nav className="bg-white shadow-md border-b px-6 py-3 print:hidden">
       <div className="flex justify-between items-center">
         {/* Ítems de navegación */}
         <ul className="flex gap-2 sm:gap-4 text-sm font-medium text-gray-700">

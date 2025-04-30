@@ -4,6 +4,7 @@ import Image from "next/image";
 import { Marketplace } from "../lib/constants/marketplaces";
 import { ArrowPathIcon } from "@heroicons/react/24/solid";
 import { OrderHeader } from "../lib/definitions/order_header";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 const getMarketplaceLogo = (marketplace: Marketplace) => {
   return `/marketplaces/${marketplace}.png`;
@@ -55,7 +56,7 @@ const OrderList = () => {
     fetchOrders();
   }, []);
 
-  if (loading) return <p className="text-center mt-5">Cargando órdenes...</p>;
+  if (loading) return <div className="mt-6"><LoadingSpinner /></div>;
 
   return (
     <div className="p-0 sm:p-6 bg-white text-black rounded-lg print:shadow-none print:p-0 print:bg-white font-sans">

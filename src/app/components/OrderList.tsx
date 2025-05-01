@@ -101,7 +101,7 @@ const OrderList = () => {
           </thead>
           <tbody className="divide-y divide-gray-200 print:divide-gray-400">
             {orders.map((orderHeader) => (
-               (orderHeader.details ?? []).map((detail, index) => (
+              (orderHeader.details ?? []).map((detail, index) => (
                 <tr
                   key={detail.id}
                   className={`${index % 2 === 0 ? "bg-white print:bg-white" : "bg-gray-50 print:bg-gray-100"} border-t border-gray-200 print:border-gray-400 print:text-xs print:h-[20px]`}
@@ -119,10 +119,11 @@ const OrderList = () => {
                   </td>
                   <td className="px-2 py-1 print:py-0.5">{orderHeader.order_id.split("-")[0]}</td>
                   <td className="px-2 py-1 print:py-0.5">
-                    {new Date(orderHeader.delivery_date.split("T")[0] + "T12:00:00Z").toLocaleDateString("es-CL", {
-                      weekday: "long",
-                      day: "numeric",
-                    })}
+
+                    {new Date(orderHeader.delivery_date).toLocaleDateString("es-CL", 
+                      {weekday: "long",
+                      day: "numeric"})
+                    }
                   </td>
                   <td className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5"><input type="checkbox" /></td>
                   <td className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5"><input type="checkbox" /></td>

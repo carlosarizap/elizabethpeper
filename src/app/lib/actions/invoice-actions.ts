@@ -45,11 +45,13 @@ export async function generateInvoices() {
         await driver.get('https://eboleta.sii.cl/emitir/');
         await driver.sleep(2000);
 
+        
+        
         const rutInput = await driver.wait(until.elementLocated(By.css('input[name="rut"]')), 10000);
-        await rutInput.sendKeys('26297437-5');
-
+        await rutInput.sendKeys(process.env.SII_RUT!);
+        
         const claveInput = await driver.findElement(By.css('input#inputPass'));
-        await claveInput.sendKeys('krys55555');
+        await claveInput.sendKeys(process.env.SII_PASS!);
 
         const ingresarBtn = await driver.findElement(By.css('button#bt_ingresar'));
         await ingresarBtn.click();

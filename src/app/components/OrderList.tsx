@@ -104,7 +104,11 @@ const OrderList = () => {
               (orderHeader.details ?? []).map((detail, index) => (
                 <tr
                   key={detail.id}
-                  className={`${index % 2 === 0 ? "bg-white print:bg-white" : "bg-gray-50 print:bg-gray-100"} border-t border-gray-200 print:border-gray-400 print:text-xs print:h-[20px]`}
+                  className={`
+                    ${index % 2 === 0 ? "bg-white print:bg-white" : "bg-gray-50 print:bg-gray-100"} 
+                    border-t border-gray-200 print:border-gray-400 print:text-xs print:h-[20px]}
+                    ${detail.product_title.toLowerCase().includes('relleno') ? "bg-yellow-100" : ""}
+                  `}
                 >
                   <td className="px-2 py-1 print:py-0.5">{detail.product_quantity}</td>
                   <td className="px-2 py-1 print:py-0.5">{detail.product_title}</td>
@@ -120,9 +124,11 @@ const OrderList = () => {
                   <td className="px-2 py-1 print:py-0.5">{orderHeader.order_id.split("-")[0]}</td>
                   <td className="px-2 py-1 print:py-0.5">
 
-                    {new Date(orderHeader.delivery_date).toLocaleDateString("es-CL", 
-                      {weekday: "long",
-                      day: "numeric"})
+                    {new Date(orderHeader.delivery_date).toLocaleDateString("es-CL",
+                      {
+                        weekday: "long",
+                        day: "numeric"
+                      })
                     }
                   </td>
                   <td className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5"><input type="checkbox" /></td>

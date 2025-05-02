@@ -28,16 +28,26 @@ useEffect(() => {
     }
   };
 
+
   fetchStats();
 }, [year, month]);
 
 
+
+
 if (loading) return <LoadingSpinner />;
+
+const totalVentas = stats
+  ? stats.marketplaces.reduce(
+      (acc: number, m: any) => acc + parseInt(m.total_ventas),
+      0
+    )
+  : 0;
 
   return (
     <div className="bg-gray-100 p-5 rounded-lg shadow-sm mb-6">
       <DashboardFilters month={month} setMonth={setMonth} year={year} setYear={setYear} />
-      <MarketplaceCards data={stats.marketplaces} />
+      <MarketplaceCards data={stats.marketplaces} totalVentas={totalVentas} />
       <ProductStatsRow topProducts={stats.topProducts} rellenos={stats.rellenos} />
     </div>
   );

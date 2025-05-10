@@ -26,6 +26,25 @@ export async function createOrder(order: {
 
     if ((exists.rowCount ?? 0) > 0) {
       orderHeaderId = exists.rows[0].id;
+    
+      // Verifica si la fecha actual difiere
+      const checkDate = await client.query(
+        'SELECT delivery_date FROM order_header WHERE id = $1',
+        [orderHeaderId]
+      );
+    
+      const existingDate = checkDate.rows[0]?.delivery_date?.toISOString().split('T')[0];
+      const newDate = order.deliveryDate;
+    
+      if (newDate && existingDate && existingDate !== newDate) {
+        // Solo actualiza si es distinta
+        await client.query(
+          `UPDATE order_header SET delivery_date = $1 WHERE id = $2`,
+          [newDate, orderHeaderId]
+        );
+        console.log(`📅 Fecha actualizada para orden ${order.orderId}: ${existingDate} → ${newDate}`);
+      }
+    
     } else {
       const totalInicial = order.productQuantity * order.productPrice;
       const insertHeader = await client.query(

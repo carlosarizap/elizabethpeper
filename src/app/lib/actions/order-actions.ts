@@ -47,31 +47,41 @@ export async function createOrder(order: {
     
     } else {
       const totalInicial = order.productQuantity * order.productPrice;
-      const insertHeader = await client.query(
-        `
-        INSERT INTO order_header (
-          order_id, 
-          total_amount, 
-          shipping_amount, 
-          status, 
-          marketplace, 
-          document_type,
-          has_invoice,
-          delivery_date
-        ) 
-        VALUES ($1, $2, $3, $4, $5, $6, false, $7)
-        RETURNING id
-        `,
-        [
-          order.orderId,
-          totalInicial,
-          order.shippingAmount ?? 0,
-          order.status,
-          order.marketplace ?? 'mercado_libre',
-          order.documentType ?? 'boleta',
-          order.deliveryDate ?? null
-        ]
-      );
+
+const isMercadoFull = order.marketplace === 'mercado_libre' && !order.deliveryDate;
+
+const hasInvoice = !isMercadoFull;
+const invoicePdf = !isMercadoFull ? Buffer.from('') : null;
+
+const insertHeader = await client.query(
+  `
+  INSERT INTO order_header (
+    order_id, 
+    total_amount, 
+    shipping_amount, 
+    status, 
+    marketplace, 
+    document_type,
+    has_invoice,
+    invoice_pdf,
+    delivery_date
+  ) 
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+  RETURNING id
+  `,
+  [
+    order.orderId,
+    totalInicial,
+    order.shippingAmount ?? 0,
+    order.status,
+    order.marketplace ?? 'mercado_libre',
+    order.documentType ?? 'boleta',
+    hasInvoice,
+    invoicePdf,
+    order.deliveryDate ?? null
+  ]
+);
+
 
       orderHeaderId = insertHeader.rows[0].id;
     }

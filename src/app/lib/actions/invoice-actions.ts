@@ -34,8 +34,13 @@ export async function generateInvoices() {
         options.addArguments('--start-maximized');
         options.setUserPreferences({ 'profile.default_content_setting_values.notifications': 2 });
 
-        const service = new ServiceBuilder('C:\\webdrivers\\chromedriver.exe');
-
+        const chromedriverPath = process.env.CHROMEDRIVER_PATH;
+        if (!chromedriverPath) {
+          throw new Error('CHROMEDRIVER_PATH not set in environment variables.');
+        }
+        
+        const service = new ServiceBuilder(chromedriverPath);
+        
         const driver = await new Builder()
             .forBrowser('chrome')
             .setChromeService(service)

@@ -11,7 +11,7 @@ export async function createOrder(order: {
   productTitle: string;
   productQuantity: number;
   productPrice: number;
-  deliveryDate?: string; 
+  deliveryDate?: string;
 }) {
   try {
     const client = await pool.connect();
@@ -26,16 +26,16 @@ export async function createOrder(order: {
 
     if ((exists.rowCount ?? 0) > 0) {
       orderHeaderId = exists.rows[0].id;
-    
+
       // Verifica si la fecha actual difiere
       const checkDate = await client.query(
         'SELECT delivery_date FROM order_header WHERE id = $1',
         [orderHeaderId]
       );
-    
+
       const existingDate = checkDate.rows[0]?.delivery_date?.toISOString().split('T')[0];
       const newDate = order.deliveryDate;
-    
+
       if (newDate && existingDate && existingDate !== newDate) {
         // Solo actualiza si es distinta
         await client.query(
@@ -44,44 +44,43 @@ export async function createOrder(order: {
         );
         console.log(`📅 Fecha actualizada para orden ${order.orderId}: ${existingDate} → ${newDate}`);
       }
-    
+
     } else {
       const totalInicial = order.productQuantity * order.productPrice;
 
-const isMercadoFull = order.marketplace === 'mercado_libre' && !order.deliveryDate;
+      const isMercadoFull = order.marketplace === 'mercado_libre' && !order.deliveryDate;
 
-const hasInvoice = !isMercadoFull;
-const invoicePdf = !isMercadoFull ? Buffer.from('') : null;
+      const hasInvoice = isMercadoFull ? true : false;
+      const invoiceUploaded = hasInvoice;
 
-const insertHeader = await client.query(
-  `
-  INSERT INTO order_header (
-    order_id, 
-    total_amount, 
-    shipping_amount, 
-    status, 
-    marketplace, 
-    document_type,
-    has_invoice,
-    invoice_pdf,
-    delivery_date
-  ) 
-  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-  RETURNING id
-  `,
-  [
-    order.orderId,
-    totalInicial,
-    order.shippingAmount ?? 0,
-    order.status,
-    order.marketplace ?? 'mercado_libre',
-    order.documentType ?? 'boleta',
-    hasInvoice,
-    invoicePdf,
-    order.deliveryDate ?? null
-  ]
-);
-
+      const insertHeader = await client.query(
+        `
+        INSERT INTO order_header (
+          order_id, 
+          total_amount, 
+          shipping_amount, 
+          status, 
+          marketplace, 
+          document_type,
+          has_invoice,
+          delivery_date,
+          invoice_uploaded
+        ) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING id
+        `,
+        [
+          order.orderId,
+          totalInicial,
+          order.shippingAmount ?? 0,
+          order.status,
+          order.marketplace ?? 'mkp',
+          order.documentType ?? 'boleta',
+          hasInvoice,
+          order.deliveryDate ?? null,
+          invoiceUploaded,
+        ]
+      );
 
       orderHeaderId = insertHeader.rows[0].id;
     }

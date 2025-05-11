@@ -100,44 +100,69 @@ const OrderList = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 print:divide-gray-400">
-            {orders.map((orderHeader) => (
-              (orderHeader.details ?? []).map((detail, index) => (
-                <tr
-                  key={detail.id}
-                  className={`
-                    ${index % 2 === 0 ? "bg-white print:bg-white" : "bg-gray-50 print:bg-gray-100"} 
-                    border-t border-gray-200 print:border-gray-400 print:text-xs print:h-[20px]}
-                    ${detail.product_title.toLowerCase().includes('relleno') ? "bg-yellow-100" : ""}
-                  `}
-                >
+            {orders.map((orderHeader, orderIndex) => {
+              const isRelleno = orderHeader.details.some(detail =>
+                detail.product_title.toLowerCase().includes('relleno')
+              );
+              const rowClassBase = `
+      ${orderIndex % 2 === 0 ? "bg-white print:bg-white" : "bg-gray-50 print:bg-gray-100"} 
+      ${isRelleno ? "bg-yellow-100" : ""} 
+      border-t border-gray-200 print:border-gray-400 print:text-xs print:h-[20px]
+    `;
+
+              return orderHeader.details.map((detail, detailIndex) => (
+                <tr key={detail.id} className={rowClassBase}>
                   <td className="px-2 py-1 print:py-0.5">{detail.product_quantity}</td>
                   <td className="px-2 py-1 print:py-0.5">{detail.product_title}</td>
-                  <td className="px-2 py-1 print:py-0.5">
-                    <Image
-                      src={getMarketplaceLogo(orderHeader.marketplace as Marketplace)}
-                      alt={orderHeader.marketplace}
-                      width={80}
-                      height={24}
-                      className="object-contain h-[18px] mx-auto"
-                    />
-                  </td>
-                  <td className="px-2 py-1 print:py-0.5">{orderHeader.order_id.split("-")[0]}</td>
-                  <td className="px-2 py-1 print:py-0.5">
 
-                    {new Date(orderHeader.delivery_date).toLocaleDateString("es-CL",
-                      {
-                        weekday: "long",
-                        day: "numeric"
-                      })
-                    }
+                  {detailIndex === 0 && (
+                    <>
+                      <td
+                        className="px-2 py-1 print:py-0.5"
+                        rowSpan={orderHeader.details.length}
+                      >
+                        <Image
+                          src={getMarketplaceLogo(orderHeader.marketplace as Marketplace)}
+                          alt={orderHeader.marketplace}
+                          width={80}
+                          height={24}
+                          className="object-contain h-[18px] mx-auto"
+                        />
+                      </td>
+
+                      <td
+                        className="px-2 py-1 print:py-0.5"
+                        rowSpan={orderHeader.details.length}
+                      >
+                        {orderHeader.order_id.split("-")[0]}
+                      </td>
+
+                      <td
+                        className="px-2 py-1 print:py-0.5"
+                        rowSpan={orderHeader.details.length}
+                      >
+                        {new Date(orderHeader.delivery_date).toLocaleDateString("es-CL", {
+                          weekday: "long",
+                          day: "numeric"
+                        })}
+                      </td>
+                    </>
+                  )}
+
+                  <td className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5">
+                    <input type="checkbox" />
                   </td>
-                  <td className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5"><input type="checkbox" /></td>
-                  <td className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5"><input type="checkbox" /></td>
-                  <td className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5"><input type="checkbox" /></td>
+                  <td className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5">
+                    <input type="checkbox" />
+                  </td>
+                  <td className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5">
+                    <input type="checkbox" />
+                  </td>
                 </tr>
-              ))
-            ))}
+              ));
+            })}
           </tbody>
+
         </table>
       </div>
 

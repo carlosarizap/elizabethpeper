@@ -158,45 +158,42 @@ export async function fetchAllOrders(
     const offset = (page - 1) * ITEMS_PER_PAGE;
     const client = await pool.connect();
 
-    let filters = [];
-    let params = [];
-    let idx = 1;
+    let filters: string[] = [];
+    let params: any[] = [];
 
     if (query) {
-      filters.push(`(oh.order_id::TEXT ILIKE $${idx} OR od.product_title ILIKE $${idx})`);
+      filters.push(`(oh.order_id::TEXT ILIKE $${params.length + 1} OR od.product_title ILIKE $${params.length + 1})`);
       params.push(`%${query}%`);
-      idx++;
     }
     if (marketplace) {
-      filters.push(`oh.marketplace = $${idx}`);
+      filters.push(`oh.marketplace = $${params.length + 1}`);
       params.push(marketplace);
-      idx++;
     }
     if (documentType) {
-      filters.push(`oh.document_type = $${idx}`);
+      filters.push(`oh.document_type = $${params.length + 1}`);
       params.push(documentType);
-      idx++;
     }
     if (deliveryDate) {
-      filters.push(`oh.delivery_date::date = $${idx}`);
+      filters.push(`oh.delivery_date::date = $${params.length + 1}`);
       params.push(deliveryDate);
-      idx++;
     }
     if (startDate) {
-      filters.push(`oh.created_at::date >= $${idx}`);
+      filters.push(`oh.created_at::date >= $${params.length + 1}`);
       params.push(startDate);
-      idx++;
     }
     if (endDate) {
-      filters.push(`oh.created_at::date <= $${idx}`);
+      filters.push(`oh.created_at::date <= $${params.length + 1}`);
       params.push(endDate);
-      idx++;
     }
     if (hasInvoice) {
-      filters.push(`oh.has_invoice = $${idx}`);
-      params.push(hasInvoice === "true"); // convierte a boolean
-      idx++;
+      filters.push(`oh.has_invoice = $${params.length + 1}`);
+      params.push(hasInvoice === "true");
     }
+
+    // Agrega LIMIT y OFFSET al final
+    const limitParam = `$${params.length + 1}`;
+    const offsetParam = `$${params.length + 2}`;
+    params.push(ITEMS_PER_PAGE, offset);
 
     const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
 
@@ -224,8 +221,8 @@ export async function fetchAllOrders(
       JOIN order_detail od ON oh.id = od.id_order_header
       ${whereClause}
       ORDER BY oh.created_at DESC
-      LIMIT $${idx} OFFSET $${idx + 1}`,
-      [...params, ITEMS_PER_PAGE, offset]
+      LIMIT ${limitParam} OFFSET ${offsetParam}`,
+      params
     );
 
     const headersMap = new Map<string, OrderHeader>();
@@ -271,6 +268,7 @@ export async function fetchAllOrders(
     throw new Error('Failed to fetch all orders.');
   }
 }
+
 export async function getOrderInvoiceById(orderId: string): Promise<Buffer | null> {
   const client = await pool.connect();
 

@@ -21,7 +21,9 @@ body {
 }
 
 @media print {
-  html, body {
+
+  html,
+  body {
     width: 100%;
     margin: 0;
     padding: 0;
@@ -32,17 +34,10 @@ body {
   }
 
   thead {
-    background-color: #e5e7eb !important; /* gris claro */
+    background-color: #e5e7eb !important;
+    /* gris claro */
     color: #111 !important;
     border-bottom: 1px solid #555 !important;
-  }
-
-  tr:nth-child(even) {
-    background-color: #f3f4f6 !important;
-  }
-
-  tr:nth-child(odd) {
-    background-color: #ffffff !important;
   }
 
   * {

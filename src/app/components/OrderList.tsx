@@ -106,7 +106,7 @@ const OrderList = () => {
               );
               const rowClassBase = `
       ${orderIndex % 2 === 0 ? "bg-white print:bg-white" : "bg-gray-50 print:bg-gray-100"} 
-${isRelleno ? "bg-yellow-200 print:bg-yellow-100" : ""}
+${isRelleno ? "bg-yellow-300 print:bg-yellow-100" : ""}
       border-t border-gray-200 print:border-gray-400 print:text-xs print:h-[20px]
     `;
 

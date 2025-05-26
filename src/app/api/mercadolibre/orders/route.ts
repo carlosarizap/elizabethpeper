@@ -34,25 +34,23 @@ export async function GET() {
     }
 
     const data = await response.json();
-
     const orders = data.results;
-    
+
     if (!orders || orders.length === 0) {
       return NextResponse.json({ error: "No se encontraron órdenes" }, { status: 404 });
     }
-    
+
     const insertedOrders = [];
-    
+
     for (const order of orders) {
       if (order.status !== "paid") continue;
 
       const orderOrPackId = order.pack_id ? order.pack_id.toString() : order.id.toString(); // ⚡️ Prioridad pack_id
       const shipmentId = order?.shipping?.id;
       let slaFechaEntrega = null;
-
       if (shipmentId) {
         try {
-          const slaResponse = await fetch(`https://api.mercadolibre.com/shipments/${shipmentId}`, {
+          const slaResponse = await fetch(`https://api.mercadolibre.com/shipments/${shipmentId}/sla`, {
             headers: {
               Authorization: `Bearer ${token}`,
             },
@@ -60,7 +58,7 @@ export async function GET() {
 
           if (slaResponse.ok) {
             const slaData = await slaResponse.json();
-            slaFechaEntrega = slaData?.shipping_option?.estimated_handling_limit?.date || null;
+            slaFechaEntrega = slaData?.expected_date ?? null;
           }
         } catch (err) {
           console.warn("No se pudo obtener fecha SLA para shipping", err);

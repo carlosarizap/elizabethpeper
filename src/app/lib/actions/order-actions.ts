@@ -1,6 +1,7 @@
 'use server';
 
 import pool from '@/app/lib/db';
+import { MARKETPLACES } from '../constants/marketplaces';
 
 export async function createOrder(order: {
   orderId: string;
@@ -29,19 +30,34 @@ export async function createOrder(order: {
 
       // Verifica si la fecha actual difiere
       const checkDate = await client.query(
-        'SELECT delivery_date FROM order_header WHERE id = $1',
+        'SELECT delivery_date, has_invoice, marketplace, invoice_uploaded, invoice_pdf, document_type FROM order_header WHERE id = $1',
         [orderHeaderId]
       );
 
-      const existingDate = checkDate.rows[0]?.delivery_date?.toISOString().split('T')[0];
-      const newDate = order.deliveryDate;
+      const existingDateRaw = checkDate.rows[0]?.delivery_date;
+      const existingDate = existingDateRaw?.toISOString().split('T')[0] ?? null;
+      const newDate = order.deliveryDate ?? null;
 
-      if (newDate && existingDate && existingDate !== newDate) {
-        // Solo actualiza si es distinta
+      if (existingDate !== newDate) {
+        // Actualizar si son diferentes, incluso si uno es null
         await client.query(
           `UPDATE order_header SET delivery_date = $1 WHERE id = $2`,
           [newDate, orderHeaderId]
         );
+
+        if (
+          checkDate.rows[0].has_invoice &&
+          checkDate.rows[0].invoice_uploaded &&
+          !checkDate.rows[0].invoice_pdf &&
+          checkDate.rows[0].marketplace == MARKETPLACES.MERCADO_LIBRE &&
+          checkDate.rows[0].document_type == "boleta"
+        ) {
+          await client.query(
+            `UPDATE order_header SET invoice_uploaded = false, has_invoice  = false WHERE id = $1`,
+            [orderHeaderId]
+          );
+        }
+
         console.log(`📅 Fecha actualizada para orden ${order.orderId}: ${existingDate} → ${newDate}`);
       }
 

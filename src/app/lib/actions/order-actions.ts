@@ -36,7 +36,7 @@ export async function createOrder(order: {
 
       const existingDateRaw = checkDate.rows[0]?.delivery_date;
       const existingDate = existingDateRaw?.toISOString().split('T')[0] ?? null;
-      const newDate = order.deliveryDate ?? null;
+      const newDate = order.deliveryDate?.trim() || null;
 
       if (existingDate !== newDate) {
         // Actualizar si son diferentes, incluso si uno es null

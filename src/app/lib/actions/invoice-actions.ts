@@ -2,8 +2,6 @@ import { Builder, By, until, Key } from 'selenium-webdriver';
 import chrome, { ServiceBuilder } from 'selenium-webdriver/chrome';
 import pool from '@/app/lib/db';
 import axios from 'axios';
-import chromedriver from 'chromedriver';
-
 
 const numpadMap: { [key: string]: string } = {
     '0': Key.NUMPAD0,

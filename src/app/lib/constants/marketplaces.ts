@@ -4,6 +4,7 @@ export const MARKETPLACES = {
     FALABELLA: 'falabella',
     RIPLEY: 'ripley',
     PARIS: 'paris',
+    WALMART: "walmart"
   } as const;
   
   export type Marketplace = (typeof MARKETPLACES)[keyof typeof MARKETPLACES];

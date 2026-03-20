@@ -49,7 +49,8 @@ export async function fetchOrders(page: number = 1, query: string = '') {
           WHEN oh.marketplace = 'falabella' THEN 2
           WHEN oh.marketplace = 'ripley' THEN 3
           WHEN oh.marketplace = 'paris' THEN 4
-          ELSE 5
+          WHEN oh.marketplace = 'walmart' THEN 5
+          ELSE 6
         END,
         oh.delivery_date ASC
       LIMIT $2 OFFSET $3`,

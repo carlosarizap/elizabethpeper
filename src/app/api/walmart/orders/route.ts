@@ -106,7 +106,7 @@ async function fetchWalmartOrders(accessToken: string) {
     throw new Error("Faltan credenciales de Walmart");
   }
 
-  const createdStartDate = getFechaHaceDias(6);
+  const createdStartDate = getFechaHaceDias(3);
   const createdEndDate = getFechaHaceDias(0);
 
   const query = new URLSearchParams({

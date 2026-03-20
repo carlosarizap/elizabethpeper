@@ -38,6 +38,7 @@ const OrderList = () => {
         "/api/falabella/orders",
         "/api/ripley/orders",
         "/api/paris/orders",
+        "/api/walmart/orders",
       ];
 
       for (const api of apis) {

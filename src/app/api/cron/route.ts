@@ -8,6 +8,7 @@ export async function GET() {
     "/api/falabella/orders",
     "/api/ripley/orders",
     "/api/paris/orders",
+    "/api/walmart/orders",
   ];
 
   const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://elizabethpeper.vercel.app/";

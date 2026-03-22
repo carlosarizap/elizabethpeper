@@ -4,6 +4,7 @@ import { uploadInvoicesToFalabella } from '@/app/lib/falabella/invoice-uploader'
 import { uploadInvoicesToMercadoLibre } from '@/app/lib/mercadolibre/invoice-uploader';
 import { uploadInvoicesToParis } from '@/app/lib/paris/invoice-uploader';
 import { uploadInvoicesToRipley } from '@/app/lib/ripley/invoice-uploader';
+import { uploadInvoicesToShopify } from '@/app/lib/shopify/invoice-uploader';
 
 export async function POST() {
   await generateInvoices();
@@ -11,6 +12,7 @@ export async function POST() {
   await uploadInvoicesToFalabella();
   await uploadInvoicesToParis();
   await uploadInvoicesToRipley();
+  await uploadInvoicesToShopify();
   
   return new Response('Boletas generadas.');
 }

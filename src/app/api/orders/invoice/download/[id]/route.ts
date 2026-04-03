@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
       return new NextResponse('Boleta no encontrada', { status: 404 });
     }
 
-    return new NextResponse(pdfBuffer, {
+    return new NextResponse(new Uint8Array(pdfBuffer), {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',

@@ -2,7 +2,7 @@ import pool from '@/app/lib/db';
 import { unstable_noStore as noStore } from 'next/cache';
 import { OrderHeader } from '../definitions/order_header';
 
-const ITEMS_PER_PAGE = 50;
+const ITEMS_PER_PAGE = 150;
 
 export async function fetchOrders(page: number = 1, query: string = '') {
   noStore();

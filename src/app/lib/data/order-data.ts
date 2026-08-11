@@ -4,6 +4,27 @@ import { OrderHeader } from '../definitions/order_header';
 
 const ITEMS_PER_PAGE = 150;
 
+function appendGroupedDetail(
+  order: OrderHeader,
+  detail: OrderHeader['details'][number],
+) {
+  const existingDetail = order.details.find(
+    (current) =>
+      current.product_title.trim().toLowerCase() ===
+        detail.product_title.trim().toLowerCase() &&
+      Number(current.product_price) === Number(detail.product_price) &&
+      current.status === detail.status &&
+      current.marketplace_status === detail.marketplace_status,
+  );
+
+  if (existingDetail) {
+    existingDetail.product_quantity += detail.product_quantity;
+    return;
+  }
+
+  order.details.push(detail);
+}
+
 export async function fetchOrders(page: number = 1, query: string = '') {
   noStore();
   try {
@@ -20,6 +41,10 @@ export async function fetchOrders(page: number = 1, query: string = '') {
         oh.has_invoice,
         oh.invoice_pdf,
         oh.status,
+        oh.return_status,
+        oh.return_updated_at,
+        oh.company_rut,
+        oh.billing_city,
         oh.marketplace,
         oh.delivery_date,
         oh.created_at AS header_created_at,
@@ -28,6 +53,10 @@ export async function fetchOrders(page: number = 1, query: string = '') {
         od.product_title,
         od.product_quantity,
         od.product_price,
+        od.marketplace_item_id,
+        od.status AS detail_status,
+        od.marketplace_status,
+        od.status_updated_at,
         od.created_at AS detail_created_at,
         od.updated_at AS detail_updated_at
       FROM order_header oh
@@ -82,6 +111,10 @@ export async function fetchOrders(page: number = 1, query: string = '') {
           invoice_pdf: row.invoice_pdf || null,
           marketplace: row.marketplace,
           status: row.status,
+          return_status: row.return_status,
+          return_updated_at: row.return_updated_at,
+          company_rut: row.company_rut,
+          billing_city: row.billing_city,
           delivery_date: row.delivery_date,
           created_at: row.header_created_at,
           updated_at: row.header_updated_at,
@@ -89,12 +122,17 @@ export async function fetchOrders(page: number = 1, query: string = '') {
         });
       }
 
-      headersMap.get(row.id)?.details.push({
+      const orderHeader = headersMap.get(row.id);
+      if (orderHeader) appendGroupedDetail(orderHeader, {
         id: row.detail_id,
         id_order_header: row.id,
         product_title: row.product_title,
         product_quantity: row.product_quantity,
         product_price: row.product_price,
+        marketplace_item_id: row.marketplace_item_id,
+        status: row.detail_status,
+        marketplace_status: row.marketplace_status,
+        status_updated_at: row.status_updated_at,
         created_at: row.detail_created_at,
         updated_at: row.detail_updated_at,
       });
@@ -124,9 +162,17 @@ export async function fetchOrderById(id: string) {
         oh.order_id,
         oh.total_amount,
         oh.status,
+        oh.return_status,
+        oh.return_updated_at,
+        oh.company_rut,
+        oh.billing_city,
         od.product_title,
         od.product_quantity,
         od.product_price,
+        od.marketplace_item_id,
+        od.status AS detail_status,
+        od.marketplace_status,
+        od.status_updated_at,
         oh.marketplace,
         oh.delivery_date
       FROM order_header oh
@@ -240,6 +286,10 @@ export async function fetchAllOrders(
           invoice_pdf: row.invoice_pdf || null,
           marketplace: row.marketplace,
           status: row.status,
+          return_status: row.return_status,
+          return_updated_at: row.return_updated_at,
+          company_rut: row.company_rut,
+          billing_city: row.billing_city,
           delivery_date: row.delivery_date,
           created_at: row.header_created_at,
           updated_at: row.header_updated_at,
@@ -247,12 +297,17 @@ export async function fetchAllOrders(
         });
       }
 
-      headersMap.get(row.id)?.details.push({
+      const orderHeader = headersMap.get(row.id);
+      if (orderHeader) appendGroupedDetail(orderHeader, {
         id: row.detail_id,
         id_order_header: row.id,
         product_title: row.product_title,
         product_quantity: row.product_quantity,
         product_price: row.product_price,
+        marketplace_item_id: row.marketplace_item_id,
+        status: row.detail_status,
+        marketplace_status: row.marketplace_status,
+        status_updated_at: row.status_updated_at,
         created_at: row.detail_created_at,
         updated_at: row.detail_updated_at,
       });

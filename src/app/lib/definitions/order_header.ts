@@ -1,4 +1,6 @@
 import { OrderDetail } from "./order_detail";
+import type { StandardOrderStatus } from "../orders/order-status";
+import type { StandardOrderReturnStatus } from "../orders/order-item-status";
 
 export interface OrderHeader {
     id: string;
@@ -9,7 +11,11 @@ export interface OrderHeader {
     has_invoice: boolean;
     invoice_pdf: string | null;
     marketplace: string;
-    status: string;
+    status: StandardOrderStatus;
+    return_status: StandardOrderReturnStatus;
+    return_updated_at: string | null;
+    company_rut: string | null;
+    billing_city: string | null;
     delivery_date: string;
     created_at: string;
     updated_at: string;

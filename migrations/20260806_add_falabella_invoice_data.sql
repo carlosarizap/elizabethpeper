@@ -1,0 +1,3 @@
+ALTER TABLE order_header
+ADD COLUMN IF NOT EXISTS company_rut VARCHAR(20),
+ADD COLUMN IF NOT EXISTS billing_city VARCHAR(100);

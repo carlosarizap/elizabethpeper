@@ -13,6 +13,6 @@ export async function POST() {
   await uploadInvoicesToParis();
   await uploadInvoicesToRipley();
   await uploadInvoicesToShopify();
-  
-  return new Response('Boletas generadas.');
+
+  return new Response('Documentos tributarios emitidos y PDF guardados correctamente.');
 }

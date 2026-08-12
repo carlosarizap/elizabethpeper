@@ -14,6 +14,7 @@ const FALABELLA_STATUS_MAP: Readonly<Record<string, StandardOrderStatus>> = {
   ready_to_ship: ORDER_STATUSES.PENDING,
   shipped: ORDER_STATUSES.SHIPPED,
   delivered: ORDER_STATUSES.DELIVERED,
+  returned: ORDER_STATUSES.RETURNED,
   failed: ORDER_STATUSES.CANCELED,
   canceled: ORDER_STATUSES.CANCELED,
 };

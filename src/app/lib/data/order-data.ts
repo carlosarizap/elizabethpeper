@@ -3,6 +3,7 @@ import { unstable_noStore as noStore } from 'next/cache';
 import { OrderHeader } from '../definitions/order_header';
 
 const ITEMS_PER_PAGE = 150;
+const ORDERS_VIEW_LIMIT = 300;
 
 function appendGroupedDetail(
   order: OrderHeader,
@@ -202,7 +203,7 @@ export async function fetchAllOrders(
 ) {
   noStore();
   try {
-    const offset = (page - 1) * ITEMS_PER_PAGE;
+    const offset = (page - 1) * ORDERS_VIEW_LIMIT;
     const client = await pool.connect();
 
     let filters: string[] = [];
@@ -240,12 +241,21 @@ export async function fetchAllOrders(
     // Agrega LIMIT y OFFSET al final
     const limitParam = `$${params.length + 1}`;
     const offsetParam = `$${params.length + 2}`;
-    params.push(ITEMS_PER_PAGE, offset);
+    params.push(ORDERS_VIEW_LIMIT, offset);
 
     const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
 
     const result = await client.query(
-      `SELECT 
+      `WITH selected_orders AS (
+        SELECT oh.id, oh.created_at
+        FROM order_header oh
+        JOIN order_detail od ON oh.id = od.id_order_header
+        ${whereClause}
+        GROUP BY oh.id, oh.created_at
+        ORDER BY oh.created_at DESC
+        LIMIT ${limitParam} OFFSET ${offsetParam}
+      )
+      SELECT 
         oh.id AS id,
         oh.order_id,
         oh.total_amount,
@@ -264,11 +274,10 @@ export async function fetchAllOrders(
         od.product_price,
         od.created_at AS detail_created_at,
         od.updated_at AS detail_updated_at
-      FROM order_header oh
+      FROM selected_orders selected
+      JOIN order_header oh ON oh.id = selected.id
       JOIN order_detail od ON oh.id = od.id_order_header
-      ${whereClause}
-      ORDER BY oh.created_at DESC
-      LIMIT ${limitParam} OFFSET ${offsetParam}`,
+      ORDER BY oh.created_at DESC, od.id ASC`,
       params
     );
 

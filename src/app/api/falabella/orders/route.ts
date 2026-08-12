@@ -114,21 +114,18 @@ export async function GET() {
         Date.now() - 1000 * 60 * 60 * 24 * 4,
       ).toISOString(),
     };
-
     const signature = calculateSignature(baseParams, apiKey);
     const queryParams = new URLSearchParams({
       ...baseParams,
       Signature: signature,
     }).toString();
-    const url = `https://sellercenter-api.falabella.com/?${queryParams}`;
-
-    const response = await fetch(url);
+    const response = await fetch(
+      `https://sellercenter-api.falabella.com/?${queryParams}`,
+    );
     const data = await response.json();
     const orders = data?.SuccessResponse?.Body?.Orders?.Order || [];
     const ordersArray = Array.isArray(orders) ? orders : [orders];
     const synchronizedOrders = [];
-
-    console.log(orders)
 
     for (const order of ordersArray) {
       const orderNumber = `${order.OrderNumber?.toString()}-${order.OrderId?.toString()}`;

@@ -414,7 +414,7 @@ async function processReceipts(
         await client.query(
             `UPDATE order_header
              SET invoice_pdf = $1,
-                 invoice_uploaded = true,
+                 invoice_uploaded = false,
                  updated_at = NOW()
              WHERE id = $2`,
             [pdfBuffer, header.id]
@@ -558,7 +558,7 @@ async function signDownloadAndSaveInvoice(
         await client.query(
              `UPDATE order_header
              SET invoice_pdf = $1,
-                 invoice_uploaded = true,
+                 invoice_uploaded = false,
                  updated_at = NOW()
              WHERE id = $2`,
             [pdfBuffer, header.id]

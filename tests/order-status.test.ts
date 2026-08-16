@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  aggregateMercadoLibreOrderStatuses,
   normalizeFalabellaOrderStatus,
+  normalizeMercadoLibreOrderStatus,
   normalizeOrderStatus,
+  resolveMercadoLibreOrderStatus,
 } from '../src/app/lib/orders/marketplace-status-mappers.ts';
 import { MARKETPLACES } from '../src/app/lib/constants/marketplaces.ts';
 import {
@@ -39,6 +42,70 @@ test('Falabella usa pendiente como fallback para estados vacÃ­os o desconocido
 test('El normalizador general selecciona el mapeador de Falabella', () => {
   assert.equal(
     normalizeOrderStatus(MARKETPLACES.FALABELLA, 'shipped'),
+    ORDER_STATUSES.SHIPPED,
+  );
+});
+
+const mercadoLibreCases = [
+  ['cancelled', ORDER_STATUSES.CANCELED],
+  ['pending_cancel', ORDER_STATUSES.CANCELED],
+  ['not_delivered', ORDER_STATUSES.CANCELED],
+  ['delivered', ORDER_STATUSES.DELIVERED],
+  ['shipped', ORDER_STATUSES.SHIPPED],
+  ['handling', ORDER_STATUSES.PENDING],
+  ['ready_to_ship', ORDER_STATUSES.PENDING],
+  ['confirmed', ORDER_STATUSES.PENDING],
+  ['payment_required', ORDER_STATUSES.PENDING],
+  ['payment_in_process', ORDER_STATUSES.PENDING],
+  ['partially_paid', ORDER_STATUSES.PENDING],
+  ['partially_refunded', ORDER_STATUSES.PENDING],
+  ['paid', ORDER_STATUSES.PENDING],
+] as const;
+
+for (const [externalStatus, expectedStatus] of mercadoLibreCases) {
+  test(`Mercado Libre: ${externalStatus} -> ${expectedStatus}`, () => {
+    assert.equal(normalizeMercadoLibreOrderStatus(externalStatus), expectedStatus);
+  });
+}
+
+test('Mercado Libre prioriza el estado logistico', () => {
+  assert.equal(
+    resolveMercadoLibreOrderStatus('paid', 'delivered'),
+    ORDER_STATUSES.DELIVERED,
+  );
+  assert.equal(
+    resolveMercadoLibreOrderStatus('cancelled', 'shipped'),
+    ORDER_STATUSES.SHIPPED,
+  );
+});
+
+test('Un pack entregado parcialmente conserva estado recibido', () => {
+  assert.equal(
+    aggregateMercadoLibreOrderStatuses([
+      ORDER_STATUSES.DELIVERED,
+      ORDER_STATUSES.CANCELED,
+    ]),
+    ORDER_STATUSES.DELIVERED,
+  );
+});
+
+test('Mercado Libre refleja devolucion total en la cabecera', () => {
+  assert.equal(
+    aggregateMercadoLibreOrderStatuses([ORDER_STATUSES.RETURNED]),
+    ORDER_STATUSES.RETURNED,
+  );
+  assert.equal(
+    aggregateMercadoLibreOrderStatuses([
+      ORDER_STATUSES.DELIVERED,
+      ORDER_STATUSES.RETURNED,
+    ]),
+    ORDER_STATUSES.DELIVERED,
+  );
+});
+
+test('El normalizador general selecciona el mapeador de Mercado Libre', () => {
+  assert.equal(
+    normalizeOrderStatus(MARKETPLACES.MERCADO_LIBRE, 'shipped'),
     ORDER_STATUSES.SHIPPED,
   );
 });

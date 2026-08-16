@@ -37,6 +37,26 @@ const FALABELLA_ORDER_ITEM_STATUS_MAP: Readonly<
   returned: STANDARD_ORDER_ITEM_STATUSES.RETURNED,
 };
 
+const MERCADO_LIBRE_ORDER_ITEM_STATUS_MAP: Readonly<
+  Record<string, StandardOrderItemStatus>
+> = {
+  cancelled: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
+  canceled: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
+  pending_cancel: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
+  not_delivered: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
+  delivered: STANDARD_ORDER_ITEM_STATUSES.DELIVERED,
+  shipped: STANDARD_ORDER_ITEM_STATUSES.SHIPPED,
+  pending: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  handling: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  ready_to_ship: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  confirmed: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  payment_required: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  payment_in_process: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  partially_paid: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  partially_refunded: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  paid: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+};
+
 function normalizeRawStatus(value: unknown): string {
   return typeof value === 'string' ? normalizeExternalStatus(value) : '';
 }
@@ -63,6 +83,20 @@ export function normalizeMarketplaceOrderItemStatus(
 ): StandardOrderItemStatus {
   if (marketplace === MARKETPLACES.FALABELLA) {
     return normalizeFalabellaOrderItemStatus(rawStatus);
+  }
+
+  if (marketplace === MARKETPLACES.MERCADO_LIBRE) {
+    const normalizedStatus = normalizeRawStatus(rawStatus);
+    const mappedStatus = MERCADO_LIBRE_ORDER_ITEM_STATUS_MAP[normalizedStatus];
+
+    if (!mappedStatus) {
+      console.warn(
+        `[OrderItemStatus] Estado desconocido para Mercado Libre: ${String(rawStatus)}`,
+      );
+      return STANDARD_ORDER_ITEM_STATUSES.PENDING;
+    }
+
+    return mappedStatus;
   }
 
   console.warn(

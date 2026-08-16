@@ -7,6 +7,7 @@ export interface OrderDetail {
     product_quantity: number;
     product_price: number;
     marketplace_item_id: string | null;
+    marketplace_order_id: string | null;
     status: StandardOrderItemStatus;
     marketplace_status: string | null;
     status_updated_at: string | null;

@@ -41,6 +41,25 @@ test('Un detalle nuevo usa pendiente cuando el estado es nulo', () => {
   );
 });
 
+const mercadoLibreItemCases = [
+  ['paid', ITEM.PENDING],
+  ['ready_to_ship', ITEM.PENDING],
+  ['shipped', ITEM.SHIPPED],
+  ['delivered', ITEM.DELIVERED],
+  ['cancelled', ITEM.CANCELED],
+  ['not_delivered', ITEM.CANCELED],
+  ['partially_refunded', ITEM.PENDING],
+] as const;
+
+for (const [rawStatus, expected] of mercadoLibreItemCases) {
+  test(`Estado de item Mercado Libre: ${rawStatus} -> ${expected}`, () => {
+    assert.equal(
+      normalizeMarketplaceOrderItemStatus(MARKETPLACES.MERCADO_LIBRE, rawStatus),
+      expected,
+    );
+  });
+}
+
 test('Un estado desconocido no reemplaza un estado actual mÃ¡s avanzado', () => {
   const incoming = normalizeMarketplaceOrderItemStatus(
     MARKETPLACES.FALABELLA,

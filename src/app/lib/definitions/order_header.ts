@@ -10,6 +10,10 @@ export interface OrderHeader {
     document_type: 'boleta' | 'factura';
     has_invoice: boolean;
     invoice_pdf: string | null;
+    has_credit_note: boolean;
+    credit_note_pdf?: string | null;
+    sii_folio: number | null;
+    sii_issued_at: string | null;
     marketplace: string;
     status: StandardOrderStatus;
     return_status: StandardOrderReturnStatus;

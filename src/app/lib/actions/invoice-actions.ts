@@ -222,6 +222,136 @@ export async function generateInvoices() {
     }
 }
 
+interface CreditNoteHeader extends InvoiceHeader {
+    sii_folio: unknown;
+    sii_issued_at: unknown;
+}
+
+interface CreditNoteDetail extends InvoiceDetail {
+    status: unknown;
+}
+
+export async function generateCreditNotes() {
+    const client = await pool.connect();
+    let driver: WebDriver | null = null;
+
+    try {
+        const { rows: headers } = await client.query<CreditNoteHeader>(
+            `SELECT oh.*
+             FROM order_header oh
+             WHERE oh.has_invoice = true
+               AND oh.document_type = 'boleta'
+               AND COALESCE(oh.has_credit_note, false) = false
+               AND oh.sii_folio IS NOT NULL
+               AND oh.sii_issued_at IS NOT NULL
+               AND EXISTS (
+                   SELECT 1
+                   FROM order_detail od
+                   WHERE od.id_order_header = oh.id
+                     AND od.status = 'devuelto'
+               )
+             ORDER BY oh.id ASC
+             LIMIT 1`
+        );
+
+        if (headers.length === 0) {
+            console.log('No hay boletas devueltas pendientes de preparar como Nota de CrÃ©dito.');
+            return;
+        }
+
+        const header = headers[0];
+        const { rows: details } = await client.query<CreditNoteDetail>(
+            `SELECT *
+             FROM order_detail
+             WHERE id_order_header = $1
+             ORDER BY id ASC`,
+            [header.id]
+        );
+        const returnedDetails = details.filter(
+            (detail) => detail.status === 'devuelto'
+        );
+
+        if (returnedDetails.length === 0) {
+            throw new Error(`La orden ${header.order_id} no tiene productos devueltos`);
+        }
+
+        const isTotalReturn = details.every(
+            (detail) => detail.status === 'devuelto'
+        );
+        const creditNoteDetails: InvoiceDetail[] = [...returnedDetails];
+        const shippingAmount = Number(header.shipping_amount ?? 0);
+
+        if (!Number.isFinite(shippingAmount) || shippingAmount < 0) {
+            throw new Error(
+                `La orden ${header.order_id} tiene un monto de envio invalido`
+            );
+        }
+        if (isTotalReturn && shippingAmount > 0) {
+            creditNoteDetails.push({
+                product_title: 'Envio',
+                product_quantity: 1,
+                product_price: shippingAmount
+            });
+        }
+
+        if (creditNoteDetails.length > 10) {
+            throw new Error(
+                `La orden ${header.order_id} requiere ${creditNoteDetails.length} lineas para la Nota de Credito. ` +
+                'El formulario del SII permite un mÃ¡ximo de 10.'
+            );
+        }
+        const receiverRutValue = process.env.SII_COMPANY_RUT;
+        if (!receiverRutValue) {
+            throw new Error(
+                'La variable de entorno SII_COMPANY_RUT no estÃ¡ configurada.'
+            );
+        }
+        const receiverRut = splitChileanRut(receiverRutValue);
+        if (calculateRutDv(receiverRut.number) !== receiverRut.dv) {
+            throw new Error('El RUT configurado en SII_COMPANY_RUT no es vÃ¡lido.');
+        }
+
+        const options = new chrome.Options();
+        options.addArguments('--start-maximized');
+        options.setUserPreferences({
+            'profile.default_content_setting_values.notifications': 2,
+        });
+        driver = await new Builder()
+            .forBrowser('chrome')
+            .setChromeOptions(options)
+            .build();
+
+        await loginSiiFactura(driver);
+        await driver.get(SII_NEW_CREDIT_NOTE_URL);
+        await driver.wait(
+            until.elementLocated(By.name('EFXP_RUT_RECEP')),
+            20000
+        );
+
+        await fillSiiCreditNoteForm(
+            driver,
+            header,
+            creditNoteDetails,
+            receiverRut,
+            isTotalReturn
+        );
+
+        await signDownloadAndSaveCreditNote(driver, client, header);
+
+        console.log(
+            `Nota de Credito de la orden ${header.order_id} emitida y guardada correctamente.`
+        );
+    } catch (error) {
+        console.error('Error durante la emision de la Nota de Credito:', error);
+        throw error;
+    } finally {
+        if (driver && process.env.SII_KEEP_BROWSER_OPEN !== 'true') {
+            await driver.quit();
+        }
+        client.release();
+    }
+}
+
 interface InvoiceHeader {
     id: string;
     order_id: string;
@@ -395,6 +525,32 @@ async function processReceipts(
             throw new Error(`El SII no entregÃ³ la boleta PDF de la orden ${header.order_id}`);
         }
 
+        const pathname = new URL(downloadUrl).pathname;
+        const match = pathname.match(
+            /boleta39_folio(\d+)_(\d{4}-\d{2}-\d{2})\.pdf$/i
+        );
+
+        if (!match) {
+            throw new Error(
+                `No se pudo obtener folio y fecha de la boleta: ${pathname}`
+            );
+        }
+
+        const siiFolio = Number(match[1]);
+        const siiIssuedAt = match[2];
+        const parsedIssuedAt = new Date(`${siiIssuedAt}T00:00:00.000Z`);
+
+        if (!Number.isSafeInteger(siiFolio) || siiFolio <= 0) {
+            throw new Error(`Folio de boleta invÃ¡lido: ${match[1]}`);
+        }
+        if (
+            !siiIssuedAt ||
+            Number.isNaN(parsedIssuedAt.getTime()) ||
+            parsedIssuedAt.toISOString().slice(0, 10) !== siiIssuedAt
+        ) {
+            throw new Error(`Fecha de emisiÃ³n de boleta invÃ¡lida: ${siiIssuedAt}`);
+        }
+
         const cookies = await driver.manage().getCookies();
         const absoluteDownloadUrl = new URL(
             downloadUrl,
@@ -414,10 +570,13 @@ async function processReceipts(
         await client.query(
             `UPDATE order_header
              SET invoice_pdf = $1,
+                 has_invoice = true,
                  invoice_uploaded = false,
+                 sii_folio = $2,
+                 sii_issued_at = $3,
                  updated_at = NOW()
-             WHERE id = $2`,
-            [pdfBuffer, header.id]
+             WHERE id = $4`,
+            [pdfBuffer, siiFolio, siiIssuedAt, header.id]
         );
         console.log(`Boleta de la orden ${header.order_id} emitida y guardada correctamente`);
 
@@ -435,7 +594,27 @@ async function signDownloadAndSaveInvoice(
     client: PoolClient,
     header: InvoiceHeader
 ) {
+    await signDownloadAndSaveSiiDocument(driver, client, header, 'invoice');
+}
+
+async function signDownloadAndSaveCreditNote(
+    driver: WebDriver,
+    client: PoolClient,
+    header: InvoiceHeader
+) {
+    await signDownloadAndSaveSiiDocument(driver, client, header, 'credit-note');
+}
+
+async function signDownloadAndSaveSiiDocument(
+    driver: WebDriver,
+    client: PoolClient,
+    header: InvoiceHeader,
+    documentKind: 'invoice' | 'credit-note'
+) {
     const certificatePassword = process.env.SII_CERT_PASSWORD;
+    const documentLabel = documentKind === 'invoice'
+        ? 'factura'
+        : 'Nota de Credito';
 
     if (!certificatePassword) {
         throw new Error(
@@ -491,13 +670,25 @@ async function signDownloadAndSaveInvoice(
         throw error;
     }
 
-    await client.query(
-        `UPDATE order_header
-         SET has_invoice = true,
-             updated_at = NOW()
-         WHERE id = $1`,
-        [header.id]
-    );
+    if (documentKind === 'invoice') {
+        await client.query(
+            `UPDATE order_header
+             SET has_invoice = true,
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [header.id]
+        );
+    } else {
+        // La Nota de Credito ya fue emitida: se marca antes de descargar el PDF
+        // para evitar una segunda emision si la descarga posterior falla.
+        await client.query(
+            `UPDATE order_header
+             SET has_credit_note = true,
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [header.id]
+        );
+    }
 
     const pdfLink = await driver.wait(
         until.elementLocated(By.css('a[href*="mipeDisplayPDF.cgi"]')),
@@ -507,7 +698,9 @@ async function signDownloadAndSaveInvoice(
 
     const relativePdfUrl = await pdfLink.getAttribute('href');
     if (!relativePdfUrl) {
-        throw new Error(`El SII no entregÃƒÂ³ el PDF para la orden ${header.order_id}`);
+        throw new Error(
+            `El SII no entrego el PDF de ${documentLabel} para la orden ${header.order_id}`
+        );
     }
 
     const signedDocumentUrl = await driver.getCurrentUrl();
@@ -551,18 +744,29 @@ async function signDownloadAndSaveInvoice(
             pdfBuffer.subarray(0, 4).toString('ascii') !== '%PDF'
         ) {
             throw new Error(
-                `La descarga de la orden ${header.order_id} no contiene un PDF vÃƒÂ¡lido`
+                `La descarga de ${documentLabel} de la orden ${header.order_id} no contiene un PDF valido`
             );
         }
 
-        await client.query(
-             `UPDATE order_header
-             SET invoice_pdf = $1,
-                 invoice_uploaded = false,
-                 updated_at = NOW()
-             WHERE id = $2`,
-            [pdfBuffer, header.id]
-        );
+        if (documentKind === 'invoice') {
+            await client.query(
+                `UPDATE order_header
+                 SET invoice_pdf = $1,
+                     invoice_uploaded = false,
+                     updated_at = NOW()
+                 WHERE id = $2`,
+                [pdfBuffer, header.id]
+            );
+        } else {
+            await client.query(
+                `UPDATE order_header
+                 SET credit_note_pdf = $1,
+                     has_credit_note = true,
+                     updated_at = NOW()
+                 WHERE id = $2`,
+                [pdfBuffer, header.id]
+            );
+        }
     } finally {
         await driver.close();
         await driver.switchTo().window(originalWindow);
@@ -691,17 +895,35 @@ export async function replaceInputValue(
     locator: Locator,
     value: string
 ): Promise<WebElement> {
-    const element = await waitForInput(driver, locator);
+    let lastError: unknown;
 
-    await driver.executeScript(
-        `const input = arguments[0];
-         input.focus();
-         input.value = '';
-         input.dispatchEvent(new Event('input', { bubbles: true }));`,
-        element
-    );
-    await element.sendKeys(value);
-    return element;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+        const element = await waitForInput(driver, locator);
+
+        try {
+            await driver.executeScript(
+                `const input = arguments[0];
+                 input.focus();
+                 input.value = '';
+                 input.dispatchEvent(new Event('input', { bubbles: true }));`,
+                element
+            );
+            await element.sendKeys(value);
+            return element;
+        } catch (error) {
+            lastError = error;
+            const isStaleElement = error instanceof Error && (
+                error.name === 'StaleElementReferenceError' ||
+                error.message.toLowerCase().includes('stale element')
+            );
+
+            if (!isStaleElement) {
+                throw error;
+            }
+        }
+    }
+
+    throw lastError;
 }
 
 async function dispatchChangeAndBlur(driver: WebDriver, element: WebElement) {
@@ -757,6 +979,204 @@ export async function fillInvoiceDetail(
     await dispatchChangeAndBlur(driver, priceInput);
 }
 
+async function selectOptionByValue(
+    driver: WebDriver,
+    locator: Locator,
+    value: string
+) {
+    const select = await driver.wait(until.elementLocated(locator), 15000);
+    await driver.wait(until.elementIsVisible(select), 10000);
+    await driver.wait(until.elementIsEnabled(select), 10000);
+
+    const optionExists = await driver.executeScript<boolean>(
+        `const select = arguments[0];
+         const value = arguments[1];
+         const option = Array.from(select.options).find(
+             (candidate) => candidate.value === value
+         );
+         if (!option) return false;
+         select.value = value;
+         select.dispatchEvent(new Event('input', { bubbles: true }));
+         select.dispatchEvent(new Event('change', { bubbles: true }));
+         return true;`,
+        select,
+        value
+    );
+
+    if (!optionExists) {
+        throw new Error(`La opciÃ³n ${value} no existe en el campo solicitado del SII`);
+    }
+
+    await driver.wait(async () => (
+        await driver.findElement(locator).getAttribute('value')
+    ) === value, 10000);
+}
+
+function parseSiiIssuedDate(value: unknown) {
+    const rawValue = value instanceof Date
+        ? value.toISOString().slice(0, 10)
+        : String(value ?? '').slice(0, 10);
+    const match = rawValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+    if (!match) {
+        throw new Error(`Fecha SII de la boleta invÃ¡lida: ${String(value)}`);
+    }
+
+    const [, year, month, day] = match;
+    const parsedDate = new Date(`${year}-${month}-${day}T00:00:00.000Z`);
+    if (
+        Number.isNaN(parsedDate.getTime()) ||
+        parsedDate.toISOString().slice(0, 10) !== `${year}-${month}-${day}`
+    ) {
+        throw new Error(`Fecha SII de la boleta invÃ¡lida: ${rawValue}`);
+    }
+
+    return { year, month, day };
+}
+
+async function setCreditNoteDetailLineCount(
+    driver: WebDriver,
+    requestedCount: number
+) {
+    const detailLocator = By.css('input[name^="EFXP_NMB_"]');
+    const getCount = async () => (await driver.findElements(detailLocator)).length;
+    let currentCount = await getCount();
+
+    while (currentCount < requestedCount) {
+        const addButton = await driver.wait(
+            until.elementLocated(By.name('AGREGA_DETALLE')),
+            10000
+        );
+        await driver.wait(until.elementIsVisible(addButton), 10000);
+        await driver.wait(until.elementIsEnabled(addButton), 10000);
+        await addButton.click();
+        const previousCount = currentCount;
+        await driver.wait(async () => (await getCount()) > previousCount, 10000);
+        currentCount = await getCount();
+    }
+
+    while (currentCount > requestedCount) {
+        const removeButton = await driver.wait(
+            until.elementLocated(By.name('QUITA_DETALLE')),
+            10000
+        );
+        await driver.wait(until.elementIsVisible(removeButton), 10000);
+        await driver.wait(until.elementIsEnabled(removeButton), 10000);
+        await removeButton.click();
+        const previousCount = currentCount;
+        await driver.wait(async () => (await getCount()) < previousCount, 10000);
+        currentCount = await getCount();
+    }
+}
+
+async function fillSiiCreditNoteForm(
+    driver: WebDriver,
+    header: CreditNoteHeader,
+    creditNoteDetails: InvoiceDetail[],
+    receiverRut: SplitRut,
+    isTotalReturn: boolean
+) {
+    const siiFolio = Number(header.sii_folio);
+    if (!Number.isSafeInteger(siiFolio) || siiFolio <= 0) {
+        throw new Error(`Folio SII invÃ¡lido para la orden ${header.order_id}`);
+    }
+    const { year, month, day } = parseSiiIssuedDate(header.sii_issued_at);
+
+    await replaceInputValue(driver, By.name('EFXP_RUT_RECEP'), receiverRut.number);
+    const dvInput = await replaceInputValue(
+        driver,
+        By.name('EFXP_DV_RECEP'),
+        receiverRut.dv
+    );
+    await dispatchChangeAndBlur(driver, dvInput);
+    await driver.actions({ async: true }).sendKeys(Key.TAB).perform();
+    await waitForReceiverLookup(driver);
+
+    await setCreditNoteDetailLineCount(driver, creditNoteDetails.length);
+    for (let index = 0; index < creditNoteDetails.length; index += 1) {
+        await fillInvoiceDetail(driver, creditNoteDetails[index], index);
+    }
+
+    await selectOptionByValue(
+        driver,
+        By.name('EFXP_TPO_DOC_REF_001'),
+        '39'
+    );
+    const folioInput = await replaceInputValue(
+        driver,
+        By.name('EFXP_FOLIO_REF_001'),
+        String(siiFolio)
+    );
+    await dispatchChangeAndBlur(driver, folioInput);
+
+    await selectOptionByValue(driver, By.name('cbo_dia_boleta_ref_01'), day);
+    await selectOptionByValue(driver, By.name('cbo_mes_boleta_ref_01'), month);
+    await selectOptionByValue(driver, By.name('cbo_anio_boleta_ref_01'), year);
+
+    const expectedYmd = `${year}${month}${day}`;
+    const expectedDmy = `${day}${month}${year}`;
+    await driver.wait(async () => {
+        const hiddenDate = await driver
+            .findElement(By.name('EFXP_FCH_REF_001'))
+            .getAttribute('value');
+        const normalizedDate = hiddenDate.replace(/\D/g, '');
+        return normalizedDate === expectedYmd || normalizedDate === expectedDmy;
+    }, 10000, 'El SII no actualizÃ³ correctamente EFXP_FCH_REF_001.');
+
+    await selectOptionByValue(
+        driver,
+        By.name('EFXP_CODIGO_REF_001'),
+        isTotalReturn ? '1' : '3'
+    );
+    const reasonInput = await replaceInputValue(
+        driver,
+        By.name('EFXP_RAZON_REF_001'),
+        'Devolucion de producto'
+    );
+    await dispatchChangeAndBlur(driver, reasonInput);
+
+    const issuerCityInput = await replaceInputValue(
+        driver,
+        By.name('EFXP_CIUDAD_ORIGEN'),
+        'Santiago'
+    );
+    await dispatchChangeAndBlur(driver, issuerCityInput);
+    const receiverCityInput = await replaceInputValue(
+        driver,
+        By.name('EFXP_CIUDAD_RECEP'),
+        'Santiago'
+    );
+    await dispatchChangeAndBlur(driver, receiverCityInput);
+
+    await driver.wait(async () => {
+        const issuerCity = await driver
+            .findElement(By.name('EFXP_CIUDAD_ORIGEN'))
+            .getAttribute('value');
+        const receiverCity = await driver
+            .findElement(By.name('EFXP_CIUDAD_RECEP'))
+            .getAttribute('value');
+        return issuerCity.trim().toLowerCase() === 'santiago' &&
+            receiverCity.trim().toLowerCase() === 'santiago';
+    }, 10000, 'No se pudieron completar las ciudades de emisor y receptor.');
+
+    const validateButton = await driver.wait(
+        until.elementLocated(By.name('Button_Update')),
+        10000
+    );
+    await driver.wait(until.elementIsVisible(validateButton), 10000);
+    await driver.wait(until.elementIsEnabled(validateButton), 10000);
+    await validateButton.click();
+
+    try {
+        await driver.wait(async () => (
+            await driver.getCurrentUrl()
+        ).includes('mipeDisplayPreView.cgi'), 20000);
+    } catch (error) {
+        await throwSiiAlertIfPresent(driver, 'validaciÃ³n de Nota de CrÃ©dito');
+        throw error;
+    }
+}
+
 async function waitForReceiverLookup(driver: WebDriver) {
     await driver.wait(async () => {
         const loaders = await driver.findElements(By.css('#ocultaGifWait img'));
@@ -768,6 +1188,17 @@ async function waitForReceiverLookup(driver: WebDriver) {
         15000
     );
     await driver.wait(until.elementIsVisible(receiverCity), 15000);
+
+    await driver.wait(async () => {
+        const addressOptions = await driver.findElements(
+            By.css('select[name="EFXP_DIR_RECEP"] option')
+        );
+        const businessActivityOptions = await driver.findElements(
+            By.css('select[name="EFXP_GIRO_RECEP"] option')
+        );
+
+        return addressOptions.length > 0 && businessActivityOptions.length > 0;
+    }, 20000, 'El SII no terminÃ³ de cargar los datos del receptor.');
 }
 
 export async function fillSiiInvoiceForm(
@@ -899,6 +1330,10 @@ const SII_FACTURA_URL =
 
 const SII_NEW_INVOICE_URL =
     'https://www1.sii.cl/cgi-bin/Portal001/mipeGenFacEx.cgi?PTDC_CODIGO=33';
+
+const SII_NEW_CREDIT_NOTE_URL =
+    'https://www1.sii.cl/cgi-bin/Portal001/mipeGenFacEx.cgi' +
+    '?TIPO_PLANTILLA=NC_BLANCO&PTDC_CODIGO=61';
 
 const SII_BOLETA_URL = 'https://eboleta.sii.cl/emitir/';
 

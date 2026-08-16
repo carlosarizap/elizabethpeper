@@ -1,0 +1,3 @@
+ALTER TABLE order_header
+ADD COLUMN IF NOT EXISTS has_credit_note BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN IF NOT EXISTS credit_note_pdf BYTEA;

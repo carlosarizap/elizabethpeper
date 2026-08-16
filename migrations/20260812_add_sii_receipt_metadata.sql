@@ -1,0 +1,3 @@
+ALTER TABLE order_header
+ADD COLUMN IF NOT EXISTS sii_folio BIGINT,
+ADD COLUMN IF NOT EXISTS sii_issued_at DATE;

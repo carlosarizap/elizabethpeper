@@ -57,6 +57,21 @@ const MERCADO_LIBRE_ORDER_ITEM_STATUS_MAP: Readonly<
   paid: STANDARD_ORDER_ITEM_STATUSES.PENDING,
 };
 
+const PARIS_ORDER_ITEM_STATUS_MAP: Readonly<
+  Record<string, StandardOrderItemStatus>
+> = {
+  ready_to_ship: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  printed_label: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  shipped: STANDARD_ORDER_ITEM_STATUSES.SHIPPED,
+  available_at_store: STANDARD_ORDER_ITEM_STATUSES.SHIPPED,
+  delivered: STANDARD_ORDER_ITEM_STATUSES.DELIVERED,
+  cancelled: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
+  canceled: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
+  stock_shortage_refunded: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
+  returned: STANDARD_ORDER_ITEM_STATUSES.RETURNED,
+  returned_to_seller: STANDARD_ORDER_ITEM_STATUSES.RETURNED,
+};
+
 function normalizeRawStatus(value: unknown): string {
   return typeof value === 'string' ? normalizeExternalStatus(value) : '';
 }
@@ -99,6 +114,20 @@ export function normalizeMarketplaceOrderItemStatus(
     return mappedStatus;
   }
 
+  if (marketplace === MARKETPLACES.PARIS) {
+    const normalizedStatus = normalizeRawStatus(rawStatus);
+    const mappedStatus = PARIS_ORDER_ITEM_STATUS_MAP[normalizedStatus];
+
+    if (!mappedStatus) {
+      console.warn(
+        `[OrderItemStatus] Estado desconocido para Paris: ${String(rawStatus)}`,
+      );
+      return STANDARD_ORDER_ITEM_STATUSES.PENDING;
+    }
+
+    return mappedStatus;
+  }
+
   console.warn(
     `[OrderItemStatus] Marketplace sin mapeador: ${marketplace}. Estado original: ${String(rawStatus)}`,
   );
@@ -110,6 +139,9 @@ export function resolveOrderItemStatusTransition(
   incomingStatus: StandardOrderItemStatus,
 ): StandardOrderItemStatus {
   if (!currentStatus) return incomingStatus;
+  if (incomingStatus === STANDARD_ORDER_ITEM_STATUSES.RETURNED) {
+    return incomingStatus;
+  }
   if (currentStatus === STANDARD_ORDER_ITEM_STATUSES.CANCELED) return currentStatus;
   if (incomingStatus === STANDARD_ORDER_ITEM_STATUSES.CANCELED) return incomingStatus;
 
@@ -128,6 +160,8 @@ export function resolveOrderItemStatusTransition(
 export function calculateOrderReturnStatus(
   itemStatuses: readonly StandardOrderItemStatus[],
 ): StandardOrderReturnStatus {
+  if (itemStatuses.length === 0) return STANDARD_ORDER_RETURN_STATUSES.NONE;
+
   const returnedCount = itemStatuses.filter(
     (status) => status === STANDARD_ORDER_ITEM_STATUSES.RETURNED,
   ).length;

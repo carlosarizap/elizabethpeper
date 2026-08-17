@@ -5,6 +5,8 @@ import {
   normalizeFalabellaOrderStatus,
   normalizeMercadoLibreOrderStatus,
   normalizeOrderStatus,
+  normalizeParisOrderStatus,
+  resolveParisOrderStatus,
   resolveMercadoLibreOrderStatus,
 } from '../src/app/lib/orders/marketplace-status-mappers.ts';
 import { MARKETPLACES } from '../src/app/lib/constants/marketplaces.ts';
@@ -107,6 +109,50 @@ test('El normalizador general selecciona el mapeador de Mercado Libre', () => {
   assert.equal(
     normalizeOrderStatus(MARKETPLACES.MERCADO_LIBRE, 'shipped'),
     ORDER_STATUSES.SHIPPED,
+  );
+});
+
+const parisCases = [
+  ['ready_to_ship', ORDER_STATUSES.PENDING],
+  ['printed_label', ORDER_STATUSES.PENDING],
+  ['shipped', ORDER_STATUSES.SHIPPED],
+  ['available_at_store', ORDER_STATUSES.SHIPPED],
+  ['delivered', ORDER_STATUSES.DELIVERED],
+  ['cancelled', ORDER_STATUSES.CANCELED],
+  ['stock_shortage_refunded', ORDER_STATUSES.CANCELED],
+  ['returned_to_seller', ORDER_STATUSES.RETURNED],
+] as const;
+
+for (const [externalStatus, expectedStatus] of parisCases) {
+  test(`Paris: ${externalStatus} -> ${expectedStatus}`, () => {
+    assert.equal(normalizeParisOrderStatus(externalStatus), expectedStatus);
+  });
+}
+
+test('El normalizador general selecciona el mapeador de Paris', () => {
+  assert.equal(
+    normalizeOrderStatus(MARKETPLACES.PARIS, 'delivered'),
+    ORDER_STATUSES.DELIVERED,
+  );
+});
+
+test('Paris mantiene recibida una devolucion parcial', () => {
+  assert.equal(
+    resolveParisOrderStatus('returned_to_seller', [
+      ORDER_STATUSES.DELIVERED,
+      ORDER_STATUSES.RETURNED,
+    ]),
+    ORDER_STATUSES.DELIVERED,
+  );
+});
+
+test('Paris marca devuelta una devolucion total', () => {
+  assert.equal(
+    resolveParisOrderStatus('delivered', [
+      ORDER_STATUSES.RETURNED,
+      ORDER_STATUSES.RETURNED,
+    ]),
+    ORDER_STATUSES.RETURNED,
   );
 });
 

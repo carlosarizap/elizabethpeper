@@ -1,96 +1,267 @@
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
-import { createOrder } from "@/app/lib/actions/order-actions";
-import { MARKETPLACES } from "@/app/lib/constants/marketplaces";
-import { NextResponse } from "next/server";
-import dayjs from "dayjs";
-import utc from "dayjs/plugin/utc";
-import timezone from "dayjs/plugin/timezone";
+import { upsertParisOrder } from '@/app/lib/actions/order-actions';
+import { MARKETPLACES } from '@/app/lib/constants/marketplaces';
+import {
+  getParisDeliveryDate,
+  getParisDocumentType,
+  getParisInvoiceData,
+  getParisMarketplaceItemId,
+  getParisRawStatus,
+  getParisShippingAmount,
+  parseParisMoney,
+  type ParisOrderPayload,
+  type ParisSubOrderPayload,
+} from '@/app/lib/paris/order-sync';
+import {
+  normalizeMarketplaceOrderItemStatus,
+} from '@/app/lib/orders/order-item-status';
+import { resolveParisOrderStatus } from '@/app/lib/orders/marketplace-status-mappers';
+import dayjs from 'dayjs';
+import timezone from 'dayjs/plugin/timezone';
+import utc from 'dayjs/plugin/utc';
+import { NextRequest, NextResponse } from 'next/server';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-function getFechaHaceDias(dias: number) {
-  const fecha = new Date();
-  fecha.setDate(fecha.getDate() - dias);
-  return fecha.toISOString().split("T")[0]; // yyyy-MM-dd
+const PARIS_API_URL = 'https://api-developers.ecomm.cencosud.com/v1/orders';
+const PARIS_RETURNED_ITEM_STATUS_ID = '11';
+const PAGE_SIZE = 100;
+const MAX_PAGES = 100;
+
+interface ParisApiResponse {
+  data?: ParisOrderPayload[];
 }
 
-export async function GET() {
+interface ParisCandidate {
+  order: ParisOrderPayload;
+  subOrder: ParisSubOrderPayload;
+}
+
+function readDays(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function syncWindow(days: number) {
+  const now = dayjs().tz('America/Santiago');
+  return {
+    from: now.subtract(days, 'day').format('YYYY-MM-DD'),
+    to: now.add(1, 'day').format('YYYY-MM-DD'),
+  };
+}
+
+async function fetchParisOrders(
+  accessToken: string,
+  sellerId: string,
+  filters: Record<string, string>,
+): Promise<ParisOrderPayload[]> {
+  const orders: ParisOrderPayload[] = [];
+
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const url = new URL(PARIS_API_URL);
+    url.searchParams.set('sellerId', sellerId);
+    url.searchParams.set('limit', String(PAGE_SIZE));
+    url.searchParams.set('offset', String(page * PAGE_SIZE));
+
+    for (const [key, value] of Object.entries(filters)) {
+      url.searchParams.set(key, value);
+    }
+
+    const response = await fetch(url, {
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(
+        `Paris GET /v1/orders respondio ${response.status}: ${body.slice(0, 500)}`,
+      );
+    }
+
+    const payload = (await response.json()) as ParisApiResponse;
+    const pageOrders = Array.isArray(payload.data) ? payload.data : [];
+    orders.push(...pageOrders);
+
+    // `count` puede ser global y no representar el filtro actual.
+    if (pageOrders.length < PAGE_SIZE) return orders;
+  }
+
+  console.warn(
+    `[Paris] Se alcanzo el limite defensivo de ${MAX_PAGES} paginas para ${JSON.stringify(filters)}`,
+  );
+  return orders;
+}
+
+function collectCandidates(
+  orders: readonly ParisOrderPayload[],
+  requestedSubOrderNumber?: string,
+): ParisCandidate[] {
+  const candidates: ParisCandidate[] = [];
+
+  for (const order of orders) {
+    for (const subOrder of order.subOrders ?? []) {
+      const subOrderNumber = String(subOrder.subOrderNumber ?? '').trim();
+      if (!subOrderNumber) continue;
+      if (requestedSubOrderNumber && subOrderNumber !== requestedSubOrderNumber) {
+        continue;
+      }
+      candidates.push({ order, subOrder });
+    }
+  }
+
+  return candidates;
+}
+
+export async function GET(request: NextRequest) {
   const accessToken = process.env.PARIS_ACCESS_TOKEN;
   const sellerId = process.env.PARIS_SELLER_ID;
 
   if (!accessToken || !sellerId) {
-    return NextResponse.json({ error: "Faltan credenciales de París" }, { status: 400 });
+    return NextResponse.json(
+      { error: 'Faltan credenciales de Paris' },
+      { status: 400 },
+    );
   }
 
+  const requestedSubOrderNumber =
+    request.nextUrl.searchParams.get('subOrderNumber')?.trim() || undefined;
+  const debug = request.nextUrl.searchParams.get('debug') === 'true';
+  const syncDays = readDays(process.env.PARIS_SYNC_DAYS, 4);
+  const returnRecheckDays = readDays(process.env.PARIS_RETURN_RECHECK_DAYS, 60);
+
   try {
-    const startDate = getFechaHaceDias(4);
-    const endDate = getFechaHaceDias(-1);
-    const url = `https://api-developers.ecomm.cencosud.com/v1/orders?gteCreatedAt=${startDate}&lteCreatedAt=${endDate}&sellerId=${sellerId}`;
+    let recentOrders: ParisOrderPayload[];
+    let returnedOrders: ParisOrderPayload[];
 
-    const response = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
+    if (requestedSubOrderNumber) {
+      recentOrders = await fetchParisOrders(accessToken, sellerId, {
+        subOrderNumber: requestedSubOrderNumber,
+      });
+      returnedOrders = [];
+    } else {
+      const recentWindow = syncWindow(syncDays);
+      const returnWindow = syncWindow(returnRecheckDays);
 
-    const data = await response.json();
-    const orders = data?.data || [];
-    const insertedOrders = [];
+      [recentOrders, returnedOrders] = await Promise.all([
+        fetchParisOrders(accessToken, sellerId, {
+          gteUpdatedAt: recentWindow.from,
+          lteUpdatedAt: recentWindow.to,
+        }),
+        fetchParisOrders(accessToken, sellerId, {
+          gteUpdatedAt: returnWindow.from,
+          lteUpdatedAt: returnWindow.to,
+          // En el payload vigente, status.id=11 corresponde a `returned`.
+          itemStatus: PARIS_RETURNED_ITEM_STATUS_ID,
+        }),
+      ]);
+    }
 
-    for (const order of orders) {
-      for (const subOrder of order.subOrders) {
-        const shippingAmount = parseFloat(subOrder.cost ?? '0') || 0;
+    const recentCandidates = collectCandidates(
+      recentOrders,
+      requestedSubOrderNumber,
+    );
+    const returnCandidates = collectCandidates(returnedOrders);
+    const candidates = new Map<string, ParisCandidate>();
 
-        const deliveryDate = dayjs(subOrder.dispatchDate || new Date().toISOString())
-          .tz("America/Santiago")
-          .set("hour", 18)
-          .set("minute", 0)
-          .set("second", 0)
-          .set("millisecond", 0)
-          .add(1, "day")
-          .format("YYYY-MM-DD"); // <-- Aquí se mantiene como fecha local
+    for (const candidate of [...recentCandidates, ...returnCandidates]) {
+      const subOrderNumber = String(candidate.subOrder.subOrderNumber).trim();
+      candidates.set(subOrderNumber, candidate);
+    }
 
-        const documentType = (order.originInvoiceType?.toLowerCase() === 'factura') ? 'factura' : 'boleta';
+    const results = [];
+    const diagnostics = [];
 
-        // ⚡ Agrupar items por nombre
-        const groupedItems = new Map<string, any[]>();
+    for (const [subOrderNumber, { order, subOrder }] of candidates) {
+      const documentType = getParisDocumentType(order, subOrder);
+      const invoiceData = documentType === 'factura'
+        ? getParisInvoiceData(order, subOrder)
+        : { companyRut: null, billingCity: null };
+      const rawOrderStatus = getParisRawStatus(subOrder.status);
 
-        for (const item of subOrder.items) {
-          const key = item?.name || "Sin título";
-          if (!groupedItems.has(key)) groupedItems.set(key, []);
-          groupedItems.get(key)!.push(item);
-        }
+      const items = (subOrder.items ?? []).map((item, itemIndex) => {
+        const rawItemStatus = getParisRawStatus(item.status);
+        const normalizedStatus = normalizeMarketplaceOrderItemStatus(
+          MARKETPLACES.PARIS,
+          rawItemStatus,
+        );
 
-        for (const [name, items] of groupedItems.entries()) {
-          const totalAmount = items.reduce(
-            (acc, item) => acc + parseFloat(item.priceAfterDiscounts?.toString() || '0'),
-            0
-          );
-          const totalQuantity = items.length;
+        return {
+          marketplaceItemId: getParisMarketplaceItemId(item, itemIndex),
+          productTitle: item.name?.trim() || 'Sin titulo',
+          // Paris entrega una entidad con id propio por cada unidad comprada.
+          productQuantity: 1,
+          productPrice: parseParisMoney(item.priceAfterDiscounts),
+          status: normalizedStatus,
+          marketplaceStatus: rawItemStatus,
+          returnId: item.returnId ?? null,
+        };
+      });
 
-          const result = await createOrder({
-            orderId: subOrder.subOrderNumber, // solo subOrderNumber
-            shippingAmount,
-            status: items[0]?.status?.name || subOrder.status?.name || "unknown",
-            marketplace: MARKETPLACES.PARIS,
-            documentType: documentType as 'boleta' | 'factura',
-            productTitle: name,
-            productQuantity: totalQuantity,
-            productPrice: totalAmount / totalQuantity, // ⚡ para guardar el precio unitario
-            deliveryDate,
-          });
+      const normalizedOrderStatus = resolveParisOrderStatus(
+        rawOrderStatus,
+        items.map((item) => item.status),
+      );
 
-          insertedOrders.push(result);
-        }
+      const result = await upsertParisOrder({
+        orderId: subOrderNumber,
+        shippingAmount: getParisShippingAmount(subOrder),
+        status: normalizedOrderStatus,
+        documentType,
+        deliveryDate: getParisDeliveryDate(subOrder),
+        companyRut: invoiceData.companyRut,
+        billingCity: invoiceData.billingCity,
+        items: items.map(({ returnId: _returnId, ...item }) => item),
+      });
+
+      if ('error' in result) {
+        throw new Error(
+          `No se pudo sincronizar la suborden Paris ${subOrderNumber}: ${result.error}`,
+        );
+      }
+
+      results.push({ subOrderNumber, ...result });
+
+      if (debug) {
+        const diagnostic = {
+          subOrderNumber,
+          rawOrderStatus,
+          normalizedOrderStatus,
+          rawOrder: order,
+          rawSubOrder: subOrder,
+          items: items.map((item) => ({
+            marketplaceItemId: item.marketplaceItemId,
+            rawItemStatus: item.marketplaceStatus,
+            normalizedStatus: item.status,
+            hasReturnId: item.returnId != null,
+          })),
+        };
+        diagnostics.push(diagnostic);
+        console.info('[Paris][StatusDiagnostic]', JSON.stringify(diagnostic));
       }
     }
 
-    return NextResponse.json({ inserted: insertedOrders });
+    return NextResponse.json({
+      synchronized: results.length,
+      updatedCandidates: recentCandidates.length,
+      returnCandidates: returnCandidates.length,
+      requestedSubOrderNumber: requestedSubOrderNumber ?? null,
+      syncDays: requestedSubOrderNumber ? null : syncDays,
+      returnRecheckDays: requestedSubOrderNumber ? null : returnRecheckDays,
+      results,
+      ...(debug ? { diagnostics } : {}),
+    });
   } catch (error) {
-    console.error("Error en la API de París:", error);
-    return NextResponse.json({ error: "Error en la API de París" }, { status: 500 });
+    console.error('Error en la API de Paris:', error);
+    return NextResponse.json(
+      {
+        error: 'Error en la API de Paris',
+        detail: error instanceof Error ? error.message : String(error),
+      },
+      { status: 500 },
+    );
   }
 }

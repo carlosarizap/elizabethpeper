@@ -43,10 +43,16 @@ export function normalizeChileanRut(value: unknown): string | null {
   const cleaned = cleanNullableString(value);
   if (!cleaned) return null;
 
-  return cleaned
+  const normalized = cleaned
     .replace(/\./g, '')
     .replace(/\s+/g, '')
     .replace(/k$/i, 'K');
+
+  if (/^\d{7,8}[\dK]$/.test(normalized)) {
+    return `${normalized.slice(0, -1)}-${normalized.slice(-1)}`;
+  }
+
+  return normalized;
 }
 
 export function getFalabellaCompanyRut(order: FalabellaOrder): string | null {

@@ -60,6 +60,26 @@ for (const [rawStatus, expected] of mercadoLibreItemCases) {
   });
 }
 
+const parisItemCases = [
+  ['ready_to_ship', ITEM.PENDING],
+  ['printed_label', ITEM.PENDING],
+  ['shipped', ITEM.SHIPPED],
+  ['available_at_store', ITEM.SHIPPED],
+  ['delivered', ITEM.DELIVERED],
+  ['cancelled', ITEM.CANCELED],
+  ['stock_shortage_refunded', ITEM.CANCELED],
+  ['returned', ITEM.RETURNED],
+] as const;
+
+for (const [rawStatus, expected] of parisItemCases) {
+  test(`Estado de item Paris: ${rawStatus} -> ${expected}`, () => {
+    assert.equal(
+      normalizeMarketplaceOrderItemStatus(MARKETPLACES.PARIS, rawStatus),
+      expected,
+    );
+  });
+}
+
 test('Un estado desconocido no reemplaza un estado actual mÃ¡s avanzado', () => {
   const incoming = normalizeMarketplaceOrderItemStatus(
     MARKETPLACES.FALABELLA,
@@ -75,6 +95,7 @@ const transitionCases = [
   [ITEM.RETURNED, ITEM.DELIVERED, ITEM.RETURNED],
   [ITEM.DELIVERED, ITEM.SHIPPED, ITEM.DELIVERED],
   [ITEM.CANCELED, ITEM.PENDING, ITEM.CANCELED],
+  [ITEM.CANCELED, ITEM.RETURNED, ITEM.RETURNED],
 ] as const;
 
 for (const [current, incoming, expected] of transitionCases) {
@@ -93,4 +114,8 @@ test('Resumen de devoluciÃ³n parcial', () => {
 
 test('Resumen de devoluciÃ³n total', () => {
   assert.equal(calculateOrderReturnStatus([ITEM.RETURNED, ITEM.RETURNED]), RETURN.TOTAL);
+});
+
+test('Un pedido sin detalles no se considera devolucion total', () => {
+  assert.equal(calculateOrderReturnStatus([]), RETURN.NONE);
 });

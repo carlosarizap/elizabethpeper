@@ -32,6 +32,10 @@ test('normaliza puntos, espacios y k minÃºscula del RUT', () => {
   assert.equal(normalizeChileanRut(' 12.345.678-k '), '12345678-K');
 });
 
+test('agrega el guion cuando el marketplace entrega RUT solo con digitos', () => {
+  assert.equal(normalizeChileanRut('123456785'), '12345678-5');
+});
+
 test('un RUT vacÃ­o o marcador nulo produce null', () => {
   assert.equal(normalizeChileanRut(''), null);
   assert.equal(normalizeChileanRut('-'), null);

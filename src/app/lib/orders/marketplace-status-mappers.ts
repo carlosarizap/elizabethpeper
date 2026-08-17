@@ -65,6 +65,51 @@ export function normalizeMercadoLibreOrderStatus(
   return mappedStatus;
 }
 
+const PARIS_STATUS_MAP: Readonly<Record<string, StandardOrderStatus>> = {
+  ready_to_ship: ORDER_STATUSES.PENDING,
+  printed_label: ORDER_STATUSES.PENDING,
+  shipped: ORDER_STATUSES.SHIPPED,
+  available_at_store: ORDER_STATUSES.SHIPPED,
+  delivered: ORDER_STATUSES.DELIVERED,
+  cancelled: ORDER_STATUSES.CANCELED,
+  canceled: ORDER_STATUSES.CANCELED,
+  stock_shortage_refunded: ORDER_STATUSES.CANCELED,
+  returned: ORDER_STATUSES.RETURNED,
+  returned_to_seller: ORDER_STATUSES.RETURNED,
+};
+
+export function normalizeParisOrderStatus(
+  status: string | null | undefined,
+): StandardOrderStatus {
+  const normalizedStatus = status ? normalizeExternalStatus(status) : '';
+  const mappedStatus = PARIS_STATUS_MAP[normalizedStatus];
+
+  if (!mappedStatus) {
+    console.warn(`[OrderStatus] Estado desconocido para Paris: ${status}`);
+    return ORDER_STATUSES.PENDING;
+  }
+
+  return mappedStatus;
+}
+
+export function resolveParisOrderStatus(
+  subOrderStatus: string | null | undefined,
+  itemStatuses: readonly StandardOrderStatus[],
+): StandardOrderStatus {
+  const baseStatus = normalizeParisOrderStatus(subOrderStatus);
+  if (itemStatuses.length === 0) return baseStatus;
+
+  const returnedCount = itemStatuses.filter(
+    (status) => status === ORDER_STATUSES.RETURNED,
+  ).length;
+
+  if (returnedCount === itemStatuses.length) return ORDER_STATUSES.RETURNED;
+  if (returnedCount > 0 && baseStatus === ORDER_STATUSES.RETURNED) {
+    return ORDER_STATUSES.DELIVERED;
+  }
+  return baseStatus;
+}
+
 export function resolveMercadoLibreOrderStatus(
   orderStatus: string | null | undefined,
   shipmentStatus: string | null | undefined,
@@ -88,6 +133,7 @@ const MARKETPLACE_STATUS_MAPPERS: Readonly<
 > = {
   [MARKETPLACES.FALABELLA]: normalizeFalabellaOrderStatus,
   [MARKETPLACES.MERCADO_LIBRE]: normalizeMercadoLibreOrderStatus,
+  [MARKETPLACES.PARIS]: normalizeParisOrderStatus,
 };
 
 export function normalizeOrderStatus(

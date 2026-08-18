@@ -63,13 +63,34 @@ const PARIS_ORDER_ITEM_STATUS_MAP: Readonly<
   ready_to_ship: STANDARD_ORDER_ITEM_STATUSES.PENDING,
   printed_label: STANDARD_ORDER_ITEM_STATUSES.PENDING,
   shipped: STANDARD_ORDER_ITEM_STATUSES.SHIPPED,
+  delivery_with_problems: STANDARD_ORDER_ITEM_STATUSES.SHIPPED,
   available_at_store: STANDARD_ORDER_ITEM_STATUSES.SHIPPED,
   delivered: STANDARD_ORDER_ITEM_STATUSES.DELIVERED,
+  overage: STANDARD_ORDER_ITEM_STATUSES.DELIVERED,
   cancelled: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
   canceled: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
   stock_shortage_refunded: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
   returned: STANDARD_ORDER_ITEM_STATUSES.RETURNED,
   returned_to_seller: STANDARD_ORDER_ITEM_STATUSES.RETURNED,
+};
+
+const RIPLEY_ORDER_ITEM_STATUS_MAP: Readonly<
+  Record<string, StandardOrderItemStatus>
+> = {
+  staging: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  waiting_acceptance: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  waiting_debit: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  waiting_debit_payment: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  waiting_refund: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  waiting_refund_payment: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  shipping: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  shipped: STANDARD_ORDER_ITEM_STATUSES.SHIPPED,
+  to_collect: STANDARD_ORDER_ITEM_STATUSES.SHIPPED,
+  received: STANDARD_ORDER_ITEM_STATUSES.DELIVERED,
+  closed: STANDARD_ORDER_ITEM_STATUSES.DELIVERED,
+  refused: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
+  canceled: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
+  refunded: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
 };
 
 function normalizeRawStatus(value: unknown): string {
@@ -121,6 +142,20 @@ export function normalizeMarketplaceOrderItemStatus(
     if (!mappedStatus) {
       console.warn(
         `[OrderItemStatus] Estado desconocido para Paris: ${String(rawStatus)}`,
+      );
+      return STANDARD_ORDER_ITEM_STATUSES.PENDING;
+    }
+
+    return mappedStatus;
+  }
+
+  if (marketplace === MARKETPLACES.RIPLEY) {
+    const normalizedStatus = normalizeRawStatus(rawStatus);
+    const mappedStatus = RIPLEY_ORDER_ITEM_STATUS_MAP[normalizedStatus];
+
+    if (!mappedStatus) {
+      console.warn(
+        `[OrderItemStatus] Estado desconocido para Ripley: ${String(rawStatus)}`,
       );
       return STANDARD_ORDER_ITEM_STATUSES.PENDING;
     }

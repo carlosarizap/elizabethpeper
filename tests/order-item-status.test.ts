@@ -64,8 +64,10 @@ const parisItemCases = [
   ['ready_to_ship', ITEM.PENDING],
   ['printed_label', ITEM.PENDING],
   ['shipped', ITEM.SHIPPED],
+  ['delivery_with_problems', ITEM.SHIPPED],
   ['available_at_store', ITEM.SHIPPED],
   ['delivered', ITEM.DELIVERED],
+  ['overage', ITEM.DELIVERED],
   ['cancelled', ITEM.CANCELED],
   ['stock_shortage_refunded', ITEM.CANCELED],
   ['returned', ITEM.RETURNED],
@@ -75,6 +77,28 @@ for (const [rawStatus, expected] of parisItemCases) {
   test(`Estado de item Paris: ${rawStatus} -> ${expected}`, () => {
     assert.equal(
       normalizeMarketplaceOrderItemStatus(MARKETPLACES.PARIS, rawStatus),
+      expected,
+    );
+  });
+}
+
+const ripleyItemCases = [
+  ['WAITING_ACCEPTANCE', ITEM.PENDING],
+  ['WAITING_REFUND_PAYMENT', ITEM.PENDING],
+  ['SHIPPING', ITEM.PENDING],
+  ['SHIPPED', ITEM.SHIPPED],
+  ['TO_COLLECT', ITEM.SHIPPED],
+  ['RECEIVED', ITEM.DELIVERED],
+  ['CLOSED', ITEM.DELIVERED],
+  ['REFUSED', ITEM.CANCELED],
+  ['CANCELED', ITEM.CANCELED],
+  ['REFUNDED', ITEM.CANCELED],
+] as const;
+
+for (const [rawStatus, expected] of ripleyItemCases) {
+  test(`Estado de item Ripley: ${rawStatus} -> ${expected}`, () => {
+    assert.equal(
+      normalizeMarketplaceOrderItemStatus(MARKETPLACES.RIPLEY, rawStatus),
       expected,
     );
   });

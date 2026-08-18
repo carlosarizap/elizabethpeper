@@ -69,6 +69,7 @@ const PARIS_STATUS_MAP: Readonly<Record<string, StandardOrderStatus>> = {
   ready_to_ship: ORDER_STATUSES.PENDING,
   printed_label: ORDER_STATUSES.PENDING,
   shipped: ORDER_STATUSES.SHIPPED,
+  delivery_with_problems: ORDER_STATUSES.SHIPPED,
   available_at_store: ORDER_STATUSES.SHIPPED,
   delivered: ORDER_STATUSES.DELIVERED,
   cancelled: ORDER_STATUSES.CANCELED,
@@ -110,6 +111,37 @@ export function resolveParisOrderStatus(
   return baseStatus;
 }
 
+const RIPLEY_STATUS_MAP: Readonly<Record<string, StandardOrderStatus>> = {
+  staging: ORDER_STATUSES.PENDING,
+  waiting_acceptance: ORDER_STATUSES.PENDING,
+  waiting_debit: ORDER_STATUSES.PENDING,
+  waiting_debit_payment: ORDER_STATUSES.PENDING,
+  waiting_refund: ORDER_STATUSES.PENDING,
+  waiting_refund_payment: ORDER_STATUSES.PENDING,
+  shipping: ORDER_STATUSES.PENDING,
+  shipped: ORDER_STATUSES.SHIPPED,
+  to_collect: ORDER_STATUSES.SHIPPED,
+  received: ORDER_STATUSES.DELIVERED,
+  closed: ORDER_STATUSES.DELIVERED,
+  refused: ORDER_STATUSES.CANCELED,
+  canceled: ORDER_STATUSES.CANCELED,
+  refunded: ORDER_STATUSES.CANCELED,
+};
+
+export function normalizeRipleyOrderStatus(
+  status: string | null | undefined,
+): StandardOrderStatus {
+  const normalizedStatus = status ? normalizeExternalStatus(status) : '';
+  const mappedStatus = RIPLEY_STATUS_MAP[normalizedStatus];
+
+  if (!mappedStatus) {
+    console.warn(`[OrderStatus] Estado desconocido para Ripley: ${status}`);
+    return ORDER_STATUSES.PENDING;
+  }
+
+  return mappedStatus;
+}
+
 export function resolveMercadoLibreOrderStatus(
   orderStatus: string | null | undefined,
   shipmentStatus: string | null | undefined,
@@ -134,6 +166,7 @@ const MARKETPLACE_STATUS_MAPPERS: Readonly<
   [MARKETPLACES.FALABELLA]: normalizeFalabellaOrderStatus,
   [MARKETPLACES.MERCADO_LIBRE]: normalizeMercadoLibreOrderStatus,
   [MARKETPLACES.PARIS]: normalizeParisOrderStatus,
+  [MARKETPLACES.RIPLEY]: normalizeRipleyOrderStatus,
 };
 
 export function normalizeOrderStatus(

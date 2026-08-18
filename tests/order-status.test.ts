@@ -6,6 +6,7 @@ import {
   normalizeMercadoLibreOrderStatus,
   normalizeOrderStatus,
   normalizeParisOrderStatus,
+  normalizeRipleyOrderStatus,
   resolveParisOrderStatus,
   resolveMercadoLibreOrderStatus,
 } from '../src/app/lib/orders/marketplace-status-mappers.ts';
@@ -116,6 +117,7 @@ const parisCases = [
   ['ready_to_ship', ORDER_STATUSES.PENDING],
   ['printed_label', ORDER_STATUSES.PENDING],
   ['shipped', ORDER_STATUSES.SHIPPED],
+  ['delivery_with_problems', ORDER_STATUSES.SHIPPED],
   ['available_at_store', ORDER_STATUSES.SHIPPED],
   ['delivered', ORDER_STATUSES.DELIVERED],
   ['cancelled', ORDER_STATUSES.CANCELED],
@@ -153,6 +155,34 @@ test('Paris marca devuelta una devolucion total', () => {
       ORDER_STATUSES.RETURNED,
     ]),
     ORDER_STATUSES.RETURNED,
+  );
+});
+
+const ripleyCases = [
+  ['STAGING', ORDER_STATUSES.PENDING],
+  ['WAITING_ACCEPTANCE', ORDER_STATUSES.PENDING],
+  ['WAITING_DEBIT', ORDER_STATUSES.PENDING],
+  ['WAITING_REFUND', ORDER_STATUSES.PENDING],
+  ['SHIPPING', ORDER_STATUSES.PENDING],
+  ['SHIPPED', ORDER_STATUSES.SHIPPED],
+  ['TO_COLLECT', ORDER_STATUSES.SHIPPED],
+  ['RECEIVED', ORDER_STATUSES.DELIVERED],
+  ['CLOSED', ORDER_STATUSES.DELIVERED],
+  ['REFUSED', ORDER_STATUSES.CANCELED],
+  ['CANCELED', ORDER_STATUSES.CANCELED],
+  ['REFUNDED', ORDER_STATUSES.CANCELED],
+] as const;
+
+for (const [externalStatus, expectedStatus] of ripleyCases) {
+  test(`Ripley: ${externalStatus} -> ${expectedStatus}`, () => {
+    assert.equal(normalizeRipleyOrderStatus(externalStatus), expectedStatus);
+  });
+}
+
+test('El normalizador general selecciona el mapeador de Ripley', () => {
+  assert.equal(
+    normalizeOrderStatus(MARKETPLACES.RIPLEY, 'RECEIVED'),
+    ORDER_STATUSES.DELIVERED,
   );
 });
 

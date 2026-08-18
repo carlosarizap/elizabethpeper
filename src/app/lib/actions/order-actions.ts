@@ -5,14 +5,17 @@ import { MARKETPLACES } from '../constants/marketplaces';
 import {
   isStandardOrderStatus,
   isValidOrderStatusTransition,
+  ORDER_STATUSES,
   type StandardOrderStatus,
 } from '../orders/order-status';
 import {
   calculateOrderReturnStatus,
   resolveOrderItemStatusTransition,
+  STANDARD_ORDER_ITEM_STATUSES,
   type StandardOrderItemStatus,
 } from '../orders/order-item-status';
 import { resolveParisExistingHeaderState } from '../paris/order-sync';
+import { resolveRipleyExistingHeaderStatus } from '../ripley/order-sync';
 
 export async function createOrder(order: {
   orderId: string;
@@ -919,6 +922,268 @@ export async function upsertParisOrder(order: ParisOrderInput) {
     await client.query('ROLLBACK');
     console.error('Error al sincronizar orden de Paris:', error);
     return { error: 'Error al sincronizar orden de Paris' };
+  } finally {
+    client.release();
+  }
+}
+
+export type RipleyOrderItemInput = FalabellaOrderItemInput;
+
+export interface RipleyOrderInput {
+  orderId: string;
+  shippingAmount: number;
+  status: StandardOrderStatus;
+  deliveryDate?: string | null;
+  items: readonly RipleyOrderItemInput[];
+}
+
+function resolveRipleyExistingItemStatus(
+  currentStatus: StandardOrderItemStatus | null,
+  currentMarketplaceStatus: string | null,
+  incomingStatus: StandardOrderItemStatus,
+  incomingMarketplaceStatus: string | null,
+): StandardOrderItemStatus {
+  const fixesPreviousShippingMapping =
+    currentStatus === STANDARD_ORDER_ITEM_STATUSES.SHIPPED &&
+    incomingStatus === STANDARD_ORDER_ITEM_STATUSES.PENDING &&
+    currentMarketplaceStatus?.trim().toUpperCase() === 'SHIPPING' &&
+    incomingMarketplaceStatus?.trim().toUpperCase() === 'SHIPPING';
+
+  return fixesPreviousShippingMapping
+    ? STANDARD_ORDER_ITEM_STATUSES.PENDING
+    : resolveOrderItemStatusTransition(currentStatus, incomingStatus);
+}
+
+export async function upsertRipleyOrder(order: RipleyOrderInput) {
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      'SELECT pg_advisory_xact_lock(hashtext($1))',
+      [`ripley:${order.orderId}`],
+    );
+
+    const existingHeader = await client.query(
+      `SELECT id, status, has_invoice, document_type
+       FROM order_header
+       WHERE order_id = $1 AND marketplace = $2
+       FOR UPDATE`,
+      [order.orderId, MARKETPLACES.RIPLEY],
+    );
+
+    let orderHeaderId: string;
+    let repeated = false;
+
+    if ((existingHeader.rowCount ?? 0) > 0) {
+      const header = existingHeader.rows[0];
+      orderHeaderId = header.id;
+      const resolvedHeader = resolveRipleyExistingHeaderStatus(
+        header.status,
+        order.status,
+      );
+
+      if (!resolvedHeader.accepted) {
+        console.warn(
+          `[OrderStatus] Transicion rechazada para orden Ripley ${order.orderId}: ${header.status} -> ${order.status}`,
+        );
+      }
+
+      await client.query(
+        `UPDATE order_header
+         SET status = $1,
+             shipping_amount = $2,
+             delivery_date = $3,
+             document_type = CASE WHEN has_invoice THEN document_type ELSE 'boleta' END,
+             marketplace = $4,
+             updated_at = NOW()
+         WHERE id = $5`,
+        [
+          resolvedHeader.status,
+          order.shippingAmount,
+          order.deliveryDate?.trim() || null,
+          MARKETPLACES.RIPLEY,
+          orderHeaderId,
+        ],
+      );
+    } else {
+      const insertedHeader = await client.query(
+        `INSERT INTO order_header (
+           order_id, total_amount, shipping_amount, status, marketplace,
+           document_type, has_invoice, delivery_date, invoice_uploaded,
+           return_status
+         )
+         VALUES ($1, 0, $2, $3, $4, 'boleta', false, $5, false, 'sin_devolucion')
+         RETURNING id`,
+        [
+          order.orderId,
+          order.shippingAmount,
+          order.status,
+          MARKETPLACES.RIPLEY,
+          order.deliveryDate ?? null,
+        ],
+      );
+      orderHeaderId = insertedHeader.rows[0].id;
+    }
+
+    for (const item of order.items) {
+      let existingDetail = await client.query(
+        `SELECT id, status, marketplace_status
+         FROM order_detail
+         WHERE id_order_header = $1 AND marketplace_item_id = $2
+         FOR UPDATE`,
+        [orderHeaderId, item.marketplaceItemId],
+      );
+
+      if ((existingDetail.rowCount ?? 0) === 0) {
+        existingDetail = await client.query(
+          `SELECT id, status, marketplace_status
+           FROM order_detail
+           WHERE id_order_header = $1
+             AND marketplace_item_id IS NULL
+             AND product_title = $2
+             AND product_quantity = $3
+           LIMIT 1
+           FOR UPDATE`,
+          [orderHeaderId, item.productTitle, item.productQuantity],
+        );
+      }
+
+      if ((existingDetail.rowCount ?? 0) === 0) {
+        existingDetail = await client.query(
+          `SELECT id, status, marketplace_status
+           FROM order_detail
+           WHERE id_order_header = $1
+             AND marketplace_item_id IS NULL
+             AND product_title = $2
+           LIMIT 1
+           FOR UPDATE`,
+          [orderHeaderId, item.productTitle],
+        );
+      }
+
+      if ((existingDetail.rowCount ?? 0) > 0) {
+        repeated = true;
+        const currentStatus = existingDetail.rows[0].status as StandardOrderItemStatus | null;
+        const resolvedStatus = resolveRipleyExistingItemStatus(
+          currentStatus,
+          existingDetail.rows[0].marketplace_status,
+          item.status,
+          item.marketplaceStatus,
+        );
+
+        await client.query(
+          `UPDATE order_detail
+           SET marketplace_item_id = $1,
+               product_title = $2,
+               product_quantity = $3,
+               product_price = $4,
+               status = $5,
+               marketplace_status = $6,
+               status_updated_at = NOW(),
+               updated_at = NOW()
+           WHERE id = $7`,
+          [
+            item.marketplaceItemId,
+            item.productTitle,
+            item.productQuantity,
+            item.productPrice,
+            resolvedStatus,
+            item.marketplaceStatus,
+            existingDetail.rows[0].id,
+          ],
+        );
+      } else {
+        await client.query(
+          `INSERT INTO order_detail (
+             id_order_header, marketplace_item_id, product_title,
+             product_quantity, product_price, status, marketplace_status,
+             status_updated_at
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+          [
+            orderHeaderId,
+            item.marketplaceItemId,
+            item.productTitle,
+            item.productQuantity,
+            item.productPrice,
+            item.status,
+            item.marketplaceStatus,
+          ],
+        );
+      }
+    }
+
+    const synchronizedProductTitles = Array.from(
+      new Set(order.items.map((item) => item.productTitle)),
+    );
+    if (synchronizedProductTitles.length > 0) {
+      await client.query(
+        `DELETE FROM order_detail
+         WHERE id_order_header = $1
+           AND marketplace_item_id IS NULL
+           AND product_title = ANY($2::text[])`,
+        [orderHeaderId, synchronizedProductTitles],
+      );
+    }
+
+    if (order.status === ORDER_STATUSES.PENDING) {
+      await client.query(
+        `UPDATE order_header oh
+         SET status = $1,
+             updated_at = NOW()
+         WHERE oh.id = $2
+           AND oh.status = $3
+           AND NOT EXISTS (
+             SELECT 1
+             FROM order_detail od
+             WHERE od.id_order_header = oh.id
+               AND od.status <> $1
+           )`,
+        [ORDER_STATUSES.PENDING, orderHeaderId, ORDER_STATUSES.SHIPPED],
+      );
+    }
+
+    await client.query(
+      `UPDATE order_header
+       SET total_amount = (
+         SELECT COALESCE(SUM(product_quantity * product_price), 0)
+         FROM order_detail
+         WHERE id_order_header = $1
+       )
+       WHERE id = $1`,
+      [orderHeaderId],
+    );
+
+    const itemStatusRows = await client.query(
+      'SELECT status FROM order_detail WHERE id_order_header = $1',
+      [orderHeaderId],
+    );
+    const returnStatus = calculateOrderReturnStatus(
+      itemStatusRows.rows.map(
+        (row: { status: StandardOrderItemStatus }) => row.status,
+      ),
+    );
+
+    await client.query(
+      `UPDATE order_header
+       SET return_status = $1::varchar,
+           return_updated_at = NOW(),
+           status = CASE
+             WHEN $1::varchar = 'devolucion_total'::varchar THEN 'devuelto'
+             ELSE status
+           END,
+           updated_at = NOW()
+       WHERE id = $2`,
+      [returnStatus, orderHeaderId],
+    );
+
+    await client.query('COMMIT');
+    return { success: true, repeated, orderHeaderId, returnStatus };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error al sincronizar orden de Ripley:', error);
+    return { error: 'Error al sincronizar orden de Ripley' };
   } finally {
     client.release();
   }

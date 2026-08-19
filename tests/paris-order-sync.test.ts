@@ -55,21 +55,28 @@ test('Paris usa SKU y posicion solo como fallback del id', () => {
   );
 });
 
-test('Paris prefiere fecha real de entrega y costo del payload v1', () => {
+test('Paris usa la fecha de entrega al courier y costo del payload v1', () => {
   const subOrder = {
     effectiveArrivalDate: '2026-08-17T16:10:00.000Z',
     arrivalDate: '2026-08-16T00:00:00.000Z',
     dispatchDate: '2026-08-15T00:00:00.000Z',
     cost: '4990',
   };
-  assert.equal(getParisDeliveryDate(subOrder), '2026-08-17');
+  assert.equal(getParisDeliveryDate(subOrder), '2026-08-15');
   assert.equal(getParisShippingAmount(subOrder), 4990);
 });
 
-test('Paris conserva dispatchDate + 1 como fallback', () => {
+test('Paris no suma un dia a dispatchDate', () => {
   assert.equal(
     getParisDeliveryDate({ dispatchDate: '2026-08-15T15:00:00.000Z' }),
-    '2026-08-16',
+    '2026-08-15',
+  );
+});
+
+test('Paris usa arrivalDate solo cuando no existe dispatchDate', () => {
+  assert.equal(
+    getParisDeliveryDate({ arrivalDate: '2026-08-20T00:00:00.000Z' }),
+    '2026-08-20',
   );
 });
 

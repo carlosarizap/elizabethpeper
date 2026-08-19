@@ -1,6 +1,4 @@
 import dayjs from 'dayjs';
-import timezone from 'dayjs/plugin/timezone.js';
-import utc from 'dayjs/plugin/utc.js';
 import {
   cleanNullableString,
   normalizeChileanRut,
@@ -10,9 +8,6 @@ import {
   isValidOrderStatusTransition,
   type StandardOrderStatus,
 } from '../orders/order-status.ts';
-
-dayjs.extend(utc);
-dayjs.extend(timezone);
 
 export interface ParisStatusPayload {
   id?: number | string | null;
@@ -185,21 +180,21 @@ function validDate(value: unknown): string | null {
 export function getParisDeliveryDate(
   subOrder: ParisSubOrderPayload,
 ): string | null {
-  const directCandidates = [
+  // La fecha operativa usada por la vista de órdenes es el compromiso de
+  // entrega al courier. arrivalDate corresponde a la promesa al cliente y
+  // puede ser uno o varios días posterior.
+  const dispatchDate = validDate(subOrder.dispatchDate);
+  if (dispatchDate) return dispatchDate;
+
+  const fallbackCandidates = [
     subOrder.effectiveArrivalDate,
     subOrder.arrivalDate,
     subOrder.arrivalDateEnd,
   ];
 
-  for (const candidate of directCandidates) {
+  for (const candidate of fallbackCandidates) {
     const date = validDate(candidate);
     if (date) return date;
   }
-
-  const dispatchDate = cleanNullableString(subOrder.dispatchDate);
-  if (!dispatchDate) return null;
-
-  const parsedDispatchDate = dayjs(dispatchDate).tz('America/Santiago');
-  if (!parsedDispatchDate.isValid()) return null;
-  return parsedDispatchDate.add(1, 'day').format('YYYY-MM-DD');
+  return null;
 }

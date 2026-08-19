@@ -7,6 +7,7 @@ import {
   normalizeOrderStatus,
   normalizeParisOrderStatus,
   normalizeRipleyOrderStatus,
+  normalizeWalmartOrderStatus,
   resolveParisOrderStatus,
   resolveMercadoLibreOrderStatus,
 } from '../src/app/lib/orders/marketplace-status-mappers.ts';
@@ -189,6 +190,24 @@ test('El normalizador general selecciona el mapeador de Ripley', () => {
     ORDER_STATUSES.DELIVERED,
   );
 });
+
+const walmartCases = [
+  ['Created', ORDER_STATUSES.PENDING],
+  ['Acknowledged', ORDER_STATUSES.PENDING],
+  ['Shipped', ORDER_STATUSES.SHIPPED],
+  ['Delivered', ORDER_STATUSES.DELIVERED],
+  ['Cancelled', ORDER_STATUSES.CANCELED],
+] as const;
+
+for (const [externalStatus, expectedStatus] of walmartCases) {
+  test(`Walmart: ${externalStatus} -> ${expectedStatus}`, () => {
+    assert.equal(normalizeWalmartOrderStatus(externalStatus), expectedStatus);
+    assert.equal(
+      normalizeOrderStatus(MARKETPLACES.WALMART, externalStatus),
+      expectedStatus,
+    );
+  });
+}
 
 const transitionCases = [
   [ORDER_STATUSES.PENDING, ORDER_STATUSES.SHIPPED, true],

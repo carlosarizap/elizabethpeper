@@ -16,6 +16,7 @@ import {
 } from '../orders/order-item-status';
 import { resolveParisExistingHeaderState } from '../paris/order-sync';
 import { resolveRipleyExistingHeaderStatus } from '../ripley/order-sync';
+import { resolveWalmartExistingHeaderStatus } from '../walmart/order-sync';
 
 export async function createOrder(order: {
   orderId: string;
@@ -1208,6 +1209,247 @@ export async function getMercadoLibreOrderIdsToRecheck(
 
     return result.rows
       .map((row: { external_order_id: unknown }) => String(row.external_order_id ?? ''))
+      .filter(Boolean);
+  } finally {
+    client.release();
+  }
+}
+
+export interface WalmartOrderItemInput {
+  marketplaceItemId: string;
+  productTitle: string;
+  productQuantity: number;
+  productPrice: number;
+  status: StandardOrderItemStatus;
+  marketplaceStatus: string | null;
+}
+
+export interface WalmartOrderInput {
+  orderId: string;
+  shippingAmount: number;
+  status: StandardOrderStatus;
+  deliveryDate?: string | null;
+  items: readonly WalmartOrderItemInput[];
+}
+
+export async function upsertWalmartOrder(order: WalmartOrderInput) {
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      'SELECT pg_advisory_xact_lock(hashtext($1))',
+      [`walmart:${order.orderId}`],
+    );
+
+    const existingHeader = await client.query(
+      `SELECT id, status, has_invoice, document_type
+       FROM order_header
+       WHERE order_id = $1 AND marketplace = $2
+       FOR UPDATE`,
+      [order.orderId, MARKETPLACES.WALMART],
+    );
+
+    let orderHeaderId: string;
+    let repeated = (existingHeader.rowCount ?? 0) > 0;
+
+    if (repeated) {
+      const header = existingHeader.rows[0];
+      orderHeaderId = header.id;
+      const resolvedHeader = resolveWalmartExistingHeaderStatus(
+        header.status,
+        order.status,
+      );
+
+      if (!resolvedHeader.accepted) {
+        console.warn(
+          `[OrderStatus] Transicion rechazada para orden Walmart ${order.orderId}: ${header.status} -> ${order.status}`,
+        );
+      }
+
+      await client.query(
+        `UPDATE order_header
+         SET status = $1,
+             shipping_amount = $2,
+             delivery_date = $3,
+             document_type = CASE WHEN has_invoice THEN document_type ELSE 'boleta' END,
+             marketplace = $4,
+             updated_at = NOW()
+         WHERE id = $5`,
+        [
+          resolvedHeader.status,
+          order.shippingAmount,
+          order.deliveryDate?.trim() || null,
+          MARKETPLACES.WALMART,
+          orderHeaderId,
+        ],
+      );
+    } else {
+      const insertedHeader = await client.query(
+        `INSERT INTO order_header (
+           order_id, total_amount, shipping_amount, status, marketplace,
+           document_type, has_invoice, delivery_date, invoice_uploaded,
+           return_status, company_rut, billing_city
+         )
+         VALUES ($1, 0, $2, $3, $4, 'boleta', false, $5, false,
+                 'sin_devolucion', NULL, NULL)
+         RETURNING id`,
+        [
+          order.orderId,
+          order.shippingAmount,
+          order.status,
+          MARKETPLACES.WALMART,
+          order.deliveryDate?.trim() || null,
+        ],
+      );
+      orderHeaderId = insertedHeader.rows[0].id;
+    }
+
+    for (const item of order.items) {
+      let existingDetail = await client.query(
+        `SELECT id, status, marketplace_status
+         FROM order_detail
+         WHERE id_order_header = $1 AND marketplace_item_id = $2
+         FOR UPDATE`,
+        [orderHeaderId, item.marketplaceItemId],
+      );
+
+      // Migra sin duplicar las filas creadas por el flujo Walmart anterior,
+      // que no guardaba marketplace_item_id.
+      if ((existingDetail.rowCount ?? 0) === 0) {
+        existingDetail = await client.query(
+          `SELECT id, status, marketplace_status
+           FROM order_detail
+           WHERE id_order_header = $1
+             AND marketplace_item_id IS NULL
+             AND product_title = $2
+           ORDER BY created_at ASC
+           LIMIT 1
+           FOR UPDATE`,
+          [orderHeaderId, item.productTitle],
+        );
+      }
+
+      if ((existingDetail.rowCount ?? 0) > 0) {
+        const detail = existingDetail.rows[0];
+        const resolvedStatus = resolveOrderItemStatusTransition(
+          detail.status as StandardOrderItemStatus | null,
+          item.status,
+        );
+
+        await client.query(
+          `UPDATE order_detail
+           SET marketplace_item_id = $1,
+               product_title = $2,
+               product_quantity = $3,
+               product_price = $4,
+               status = $5,
+               marketplace_status = $6,
+               status_updated_at = NOW(),
+               updated_at = NOW()
+           WHERE id = $7`,
+          [
+            item.marketplaceItemId,
+            item.productTitle,
+            item.productQuantity,
+            item.productPrice,
+            resolvedStatus,
+            item.marketplaceStatus,
+            detail.id,
+          ],
+        );
+      } else {
+        await client.query(
+          `INSERT INTO order_detail (
+             id_order_header, marketplace_item_id, product_title,
+             product_quantity, product_price, status, marketplace_status,
+             status_updated_at
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+          [
+            orderHeaderId,
+            item.marketplaceItemId,
+            item.productTitle,
+            item.productQuantity,
+            item.productPrice,
+            item.status,
+            item.marketplaceStatus,
+          ],
+        );
+      }
+    }
+
+    const synchronizedTitles = Array.from(
+      new Set(order.items.map((item) => item.productTitle)),
+    );
+    if (synchronizedTitles.length > 0) {
+      await client.query(
+        `DELETE FROM order_detail
+         WHERE id_order_header = $1
+           AND marketplace_item_id IS NULL
+           AND product_title = ANY($2::text[])`,
+        [orderHeaderId, synchronizedTitles],
+      );
+    }
+
+    await client.query(
+      `UPDATE order_header
+       SET total_amount = (
+         SELECT COALESCE(SUM(product_quantity * product_price), 0)
+         FROM order_detail
+         WHERE id_order_header = $1
+       )
+       WHERE id = $1`,
+      [orderHeaderId],
+    );
+
+    const itemStatusRows = await client.query(
+      'SELECT status FROM order_detail WHERE id_order_header = $1',
+      [orderHeaderId],
+    );
+    const returnStatus = calculateOrderReturnStatus(
+      itemStatusRows.rows.map(
+        (row: { status: StandardOrderItemStatus }) => row.status,
+      ),
+    );
+
+    await client.query(
+      `UPDATE order_header
+       SET return_status = $1::varchar,
+           return_updated_at = NOW(),
+           status = CASE
+             WHEN $1::varchar = 'devolucion_total'::varchar THEN 'devuelto'
+             ELSE status
+           END,
+           updated_at = NOW()
+       WHERE id = $2`,
+      [returnStatus, orderHeaderId],
+    );
+
+    await client.query('COMMIT');
+    return { success: true, repeated, orderHeaderId, returnStatus };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error al sincronizar orden de Walmart:', error);
+    return { error: 'Error al sincronizar orden de Walmart' };
+  } finally {
+    client.release();
+  }
+}
+
+export async function getActiveWalmartOrderIds(): Promise<string[]> {
+  const client = await pool.connect();
+  try {
+    const result = await client.query(
+      `SELECT order_id
+       FROM order_header
+       WHERE marketplace = $1
+         AND status IN ('pendiente', 'enviado')
+       ORDER BY updated_at ASC`,
+      [MARKETPLACES.WALMART],
+    );
+    return result.rows
+      .map((row: { order_id: unknown }) => String(row.order_id ?? '').trim())
       .filter(Boolean);
   } finally {
     client.release();

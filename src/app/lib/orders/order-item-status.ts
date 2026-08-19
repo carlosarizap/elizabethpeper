@@ -97,6 +97,17 @@ const RIPLEY_ORDER_ITEM_STATUS_MAP: Readonly<
   refunded: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
 };
 
+const WALMART_ORDER_ITEM_STATUS_MAP: Readonly<
+  Record<string, StandardOrderItemStatus>
+> = {
+  created: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  acknowledged: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  shipped: STANDARD_ORDER_ITEM_STATUSES.SHIPPED,
+  delivered: STANDARD_ORDER_ITEM_STATUSES.DELIVERED,
+  cancelled: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
+  canceled: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
+};
+
 function normalizeRawStatus(value: unknown): string {
   return typeof value === 'string' ? normalizeExternalStatus(value) : '';
 }
@@ -160,6 +171,20 @@ export function normalizeMarketplaceOrderItemStatus(
     if (!mappedStatus) {
       console.warn(
         `[OrderItemStatus] Estado desconocido para Ripley: ${String(rawStatus)}`,
+      );
+      return STANDARD_ORDER_ITEM_STATUSES.PENDING;
+    }
+
+    return mappedStatus;
+  }
+
+  if (marketplace === MARKETPLACES.WALMART) {
+    const normalizedStatus = normalizeRawStatus(rawStatus);
+    const mappedStatus = WALMART_ORDER_ITEM_STATUS_MAP[normalizedStatus];
+
+    if (!mappedStatus) {
+      console.warn(
+        `[OrderItemStatus] Estado desconocido para Walmart: ${String(rawStatus)}`,
       );
       return STANDARD_ORDER_ITEM_STATUSES.PENDING;
     }

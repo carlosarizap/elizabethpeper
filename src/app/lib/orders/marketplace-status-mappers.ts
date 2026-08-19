@@ -146,6 +146,28 @@ export function normalizeRipleyOrderStatus(
   return mappedStatus;
 }
 
+const WALMART_STATUS_MAP: Readonly<Record<string, StandardOrderStatus>> = {
+  created: ORDER_STATUSES.PENDING,
+  acknowledged: ORDER_STATUSES.PENDING,
+  shipped: ORDER_STATUSES.SHIPPED,
+  delivered: ORDER_STATUSES.DELIVERED,
+  cancelled: ORDER_STATUSES.CANCELED,
+  canceled: ORDER_STATUSES.CANCELED,
+};
+
+export function normalizeWalmartOrderStatus(
+  status: string | null | undefined,
+): StandardOrderStatus {
+  const normalizedStatus = status ? normalizeExternalStatus(status) : '';
+  const mappedStatus = WALMART_STATUS_MAP[normalizedStatus];
+
+  if (!mappedStatus) {
+    console.warn(`[OrderStatus] Estado desconocido para Walmart: ${status}`);
+    return ORDER_STATUSES.PENDING;
+  }
+  return mappedStatus;
+}
+
 export function resolveMercadoLibreOrderStatus(
   orderStatus: string | null | undefined,
   shipmentStatus: string | null | undefined,
@@ -171,6 +193,7 @@ const MARKETPLACE_STATUS_MAPPERS: Readonly<
   [MARKETPLACES.MERCADO_LIBRE]: normalizeMercadoLibreOrderStatus,
   [MARKETPLACES.PARIS]: normalizeParisOrderStatus,
   [MARKETPLACES.RIPLEY]: normalizeRipleyOrderStatus,
+  [MARKETPLACES.WALMART]: normalizeWalmartOrderStatus,
 };
 
 export function normalizeOrderStatus(

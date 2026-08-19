@@ -108,6 +108,23 @@ for (const [rawStatus, expected] of ripleyItemCases) {
   });
 }
 
+const walmartItemCases = [
+  ['Created', ITEM.PENDING],
+  ['Acknowledged', ITEM.PENDING],
+  ['Shipped', ITEM.SHIPPED],
+  ['Delivered', ITEM.DELIVERED],
+  ['Cancelled', ITEM.CANCELED],
+] as const;
+
+for (const [rawStatus, expected] of walmartItemCases) {
+  test(`Estado de item Walmart: ${rawStatus} -> ${expected}`, () => {
+    assert.equal(
+      normalizeMarketplaceOrderItemStatus(MARKETPLACES.WALMART, rawStatus),
+      expected,
+    );
+  });
+}
+
 test('Un estado desconocido no reemplaza un estado actual mÃ¡s avanzado', () => {
   const incoming = normalizeMarketplaceOrderItemStatus(
     MARKETPLACES.FALABELLA,

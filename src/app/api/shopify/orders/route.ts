@@ -11,7 +11,11 @@ import {
   getShopifyAccessToken,
   getShopifyGrantedScopes,
 } from '@/app/lib/shopify/token-manager';
+import { getMarketplaceSyncMode } from '@/app/lib/orders/marketplace-sync';
 import { NextRequest, NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 
 const ORDERS_PAGE_SIZE = 100;
 
@@ -144,7 +148,7 @@ function orderDetailQuery(includeReturns: boolean): string {
   `;
 }
 
-async function fetchOrderGidsForPeriod(accessToken: string) {
+async function fetchOrderGidsForPeriod(accessToken: string, days: number) {
   const query = `
     query ShopifyUpdatedOrders($query: String!, $cursor: String) {
       orders(
@@ -159,9 +163,7 @@ async function fetchOrderGidsForPeriod(accessToken: string) {
       }
     }
   `;
-  const search = buildShopifyUpdatedAtSearch(
-    positiveInteger(process.env.SHOPIFY_SYNC_DAYS, 4),
-  );
+  const search = buildShopifyUpdatedAtSearch(days);
   const paginated = await collectShopifyCursorPages(async (cursor) => {
     const data: {
       orders?: {
@@ -221,14 +223,21 @@ async function fetchShopifyOrder(
 export async function GET(request: NextRequest) {
   try {
     const requestedOrderId = request.nextUrl.searchParams.get('orderId')?.trim() || null;
+    const mode = getMarketplaceSyncMode(request.nextUrl.searchParams);
+    const syncDays = positiveInteger(process.env.SHOPIFY_SYNC_DAYS, 4);
+    const returnRecheckDays = positiveInteger(
+      process.env.SHOPIFY_RETURN_RECHECK_DAYS,
+      60,
+    );
     const accessToken = await getShopifyAccessToken();
     const scopes = await getShopifyGrantedScopes(accessToken);
     if (!scopes.has('read_orders') && !scopes.has('write_orders')) {
       throw new Error('La app Shopify no tiene read_orders ni write_orders');
     }
 
-    const includeReturns = scopes.has('read_returns');
-    if (!includeReturns) {
+    const returnsRequested = mode === 'returns' || Boolean(requestedOrderId);
+    const includeReturns = returnsRequested && scopes.has('read_returns');
+    if (returnsRequested && !includeReturns) {
       console.warn(
         '[Shopify][Returns] Falta el scope read_returns; se sincronizaran ordenes, fulfillments y refunds sin marcar devoluciones fisicas.',
       );
@@ -252,7 +261,10 @@ export async function GET(request: NextRequest) {
       }
       orderGids = [gid];
     } else {
-      const period = await fetchOrderGidsForPeriod(accessToken);
+      const period = await fetchOrderGidsForPeriod(
+        accessToken,
+        mode === 'returns' ? returnRecheckDays : syncDays,
+      );
       orderGids = period.ids;
       pages = period.pages;
       search = period.search;
@@ -280,13 +292,19 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
+      mode,
       synchronized: results.filter((result) => 'success' in result && result.success).length,
       candidates: orderGids.length,
       requestedOrderId,
+      syncDays: !requestedOrderId && mode === 'orders' ? syncDays : null,
+      returnRecheckDays:
+        !requestedOrderId && mode === 'returns' ? returnRecheckDays : null,
       apiVersion: SHOPIFY_ADMIN_API_VERSION,
       pagination: { pages, search },
       returns: {
-        status: includeReturns ? 'enabled' : 'disabled_missing_scope',
+        status: !returnsRequested
+          ? 'not_requested'
+          : includeReturns ? 'enabled' : 'disabled_missing_scope',
         requiredScope: 'read_returns',
       },
       oldOrders: {

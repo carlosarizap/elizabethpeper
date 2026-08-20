@@ -26,7 +26,11 @@ import {
   ORDER_STATUSES,
   type StandardOrderStatus,
 } from '@/app/lib/orders/order-status';
+import { getMarketplaceSyncMode } from '@/app/lib/orders/marketplace-sync';
 import { NextRequest, NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 
 const MERCADO_LIBRE_API = 'https://api.mercadolibre.com';
 const SITE_ID = 'MLC';
@@ -387,6 +391,8 @@ export async function GET(request: NextRequest) {
   const sellerId = process.env.MERCADO_LIBRE_SELLER_ID;
   const token = await getValidAccessToken();
   const requestedOrderId = request.nextUrl.searchParams.get('orderId')?.trim();
+  const mode = getMarketplaceSyncMode(request.nextUrl.searchParams);
+  const shouldCheckReturns = mode === 'returns' || Boolean(requestedOrderId);
 
   if (!sellerId || !token) {
     return NextResponse.json(
@@ -405,14 +411,20 @@ export async function GET(request: NextRequest) {
   try {
     const recheckDays = positiveIntegerEnv(
       'MERCADO_LIBRE_RETURN_RECHECK_DAYS',
-      120,
+      60,
     );
-    const [updatedOrderIds, existingOrderIds] = requestedOrderId
-      ? [[requestedOrderId], []]
-      : await Promise.all([
-          fetchUpdatedOrderIds(sellerId, token),
-          getMercadoLibreOrderIdsToRecheck(recheckDays),
-        ]);
+    let updatedOrderIds: string[];
+    let existingOrderIds: string[];
+    if (requestedOrderId) {
+      updatedOrderIds = [requestedOrderId];
+      existingOrderIds = [];
+    } else if (mode === 'returns') {
+      updatedOrderIds = [];
+      existingOrderIds = await getMercadoLibreOrderIdsToRecheck(recheckDays);
+    } else {
+      updatedOrderIds = await fetchUpdatedOrderIds(sellerId, token);
+      existingOrderIds = [];
+    }
     const orders = await hydrateOrdersAndPacks(
       [...updatedOrderIds, ...existingOrderIds],
       token,
@@ -538,12 +550,12 @@ export async function GET(request: NextRequest) {
           if (billingPayload) invoicePayloads.push(billingPayload);
         }
 
-        const returnState = await fetchReturnState(
-          order,
-          token,
-          returnClaimsStats,
-        );
-        if (!returnState.checked) packReturnsChecked = false;
+        const returnState = shouldCheckReturns
+          ? await fetchReturnState(order, token, returnClaimsStats)
+          : { returned: false, marketplaceStatus: null, checked: false };
+        if (shouldCheckReturns && !returnState.checked) {
+          packReturnsChecked = false;
+        }
         orderStatuses.push(
           returnState.returned
             ? ORDER_STATUSES.RETURNED
@@ -603,21 +615,26 @@ export async function GET(request: NextRequest) {
       });
       synchronizedOrders.push({
         ...result,
-        returnCheckStatus: packReturnsChecked ? 'checked' : 'not_checked',
+        returnCheckStatus: shouldCheckReturns
+          ? packReturnsChecked ? 'checked' : 'not_checked'
+          : 'not_requested',
       });
     }
 
     return NextResponse.json({
+      mode,
       synchronized: synchronizedOrders.length,
       updatedCandidates: updatedOrderIds.length,
       recheckedCandidates: existingOrderIds.length,
       requestedOrderId: requestedOrderId ?? null,
       returnChecks: {
-        status: returnClaimsStats.accessDenied
-          ? 'unauthorized'
-          : returnClaimsStats.failedOrders > 0
-            ? 'partial'
-            : 'completed',
+        status: !shouldCheckReturns
+          ? 'not_requested'
+          : returnClaimsStats.accessDenied
+            ? 'unauthorized'
+            : returnClaimsStats.failedOrders > 0
+              ? 'partial'
+              : 'completed',
         checkedOrders: returnClaimsStats.checkedOrders,
         skippedOrders: returnClaimsStats.skippedOrders,
         failedOrders: returnClaimsStats.failedOrders,

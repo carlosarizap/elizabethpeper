@@ -11,7 +11,11 @@ import {
 } from '@/app/lib/ripley/order-sync';
 import { normalizeMarketplaceOrderItemStatus } from '@/app/lib/orders/order-item-status';
 import { normalizeOrderStatus } from '@/app/lib/orders/marketplace-status-mappers';
+import { getMarketplaceSyncMode } from '@/app/lib/orders/marketplace-sync';
 import { NextRequest, NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 
 const RIPLEY_ORDERS_URL = 'https://ripley-prod.mirakl.net/api/orders';
 
@@ -76,41 +80,37 @@ export async function GET(request: NextRequest) {
 
   const requestedOrderId = request.nextUrl.searchParams.get('orderId')?.trim() || undefined;
   const debug = request.nextUrl.searchParams.get('debug') === 'true';
+  const mode = getMarketplaceSyncMode(request.nextUrl.searchParams);
   const syncDays = readDays(process.env.RIPLEY_SYNC_DAYS, 4);
   const returnRecheckDays = readDays(process.env.RIPLEY_RETURN_RECHECK_DAYS, 60);
 
   try {
     let recentOrders: RipleyOrder[];
-    let historicalRefundOrders: RipleyOrder[];
+    let historicalOrders: RipleyOrder[];
 
     if (requestedOrderId) {
       recentOrders = await fetchRipleyOrders(apiKey, {
         order_ids: requestedOrderId,
       });
-      historicalRefundOrders = [];
+      historicalOrders = [];
+    } else if (mode === 'returns') {
+      const returnWindow = updateWindow(returnRecheckDays);
+      recentOrders = [];
+      historicalOrders = await fetchRipleyOrders(apiKey, {
+        start_update_date: returnWindow.start,
+        end_update_date: returnWindow.end,
+      });
     } else {
       const recentWindow = updateWindow(syncDays);
-      const returnWindow = updateWindow(returnRecheckDays);
-      const responses = await Promise.all([
-        fetchRipleyOrders(apiKey, {
-          start_update_date: recentWindow.start,
-          end_update_date: recentWindow.end,
-        }),
-        returnRecheckDays > syncDays
-          ? fetchRipleyOrders(apiKey, {
-              start_update_date: returnWindow.start,
-              end_update_date: returnWindow.end,
-            })
-          : Promise.resolve([]),
-      ]);
-      recentOrders = responses[0];
-      historicalRefundOrders = responses[1].filter(
-        hasCompletedRipleyProductRefund,
-      );
+      recentOrders = await fetchRipleyOrders(apiKey, {
+        start_update_date: recentWindow.start,
+        end_update_date: recentWindow.end,
+      });
+      historicalOrders = [];
     }
 
     const candidates = new Map<string, RipleyOrder>();
-    for (const order of [...recentOrders, ...historicalRefundOrders]) {
+    for (const order of [...recentOrders, ...historicalOrders]) {
       const orderId = order.order_id?.trim();
       if (orderId) candidates.set(orderId, order);
     }
@@ -207,12 +207,15 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
+      mode,
       synchronized: results.length,
       updatedCandidates: recentOrders.length,
-      returnCandidates: historicalRefundOrders.length,
+      historicalCandidates: historicalOrders.length,
+      returnCandidates: historicalOrders.filter(hasCompletedRipleyProductRefund).length,
       requestedOrderId: requestedOrderId ?? null,
-      syncDays: requestedOrderId ? null : syncDays,
-      returnRecheckDays: requestedOrderId ? null : returnRecheckDays,
+      syncDays: !requestedOrderId && mode === 'orders' ? syncDays : null,
+      returnRecheckDays:
+        !requestedOrderId && mode === 'returns' ? returnRecheckDays : null,
       partialQuantityRefunds,
       results,
       ...(debug ? { diagnostics } : {}),

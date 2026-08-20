@@ -16,8 +16,12 @@ import {
   type WalmartOrder,
   type WalmartReturnOrder,
 } from '@/app/lib/walmart/order-sync';
+import { getMarketplaceSyncMode } from '@/app/lib/orders/marketplace-sync';
 import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 
 const WALMART_API_BASE = 'https://marketplace.walmartapis.com';
 const WALMART_GLOBAL_VERSION = '3.1';
@@ -226,8 +230,12 @@ export async function GET(request: NextRequest) {
   const requestedPurchaseOrderId =
     request.nextUrl.searchParams.get('purchaseOrderId')?.trim() || undefined;
   const debug = request.nextUrl.searchParams.get('debug') === 'true';
+  const mode = getMarketplaceSyncMode(request.nextUrl.searchParams);
   const syncDays = readDays(process.env.WALMART_SYNC_DAYS, 4);
-  const returnSyncDays = readDays(process.env.WALMART_RETURN_SYNC_DAYS, 4);
+  const returnRecheckDays = readDays(
+    process.env.WALMART_RETURN_RECHECK_DAYS,
+    60,
+  );
 
   try {
     const accessToken = await getWalmartToken();
@@ -244,14 +252,9 @@ export async function GET(request: NextRequest) {
       if (customerOrderId) {
         returnOrders = await fetchWalmartReturnPages(accessToken, { customerOrderId });
       }
-    } else {
-      const orderWindow = syncWindow(syncDays);
-      const returnWindow = syncWindow(returnSyncDays);
-      const [recentOrders, activeOrderIds, recentReturns] = await Promise.all([
-        fetchWalmartOrderPages(accessToken, {
-          createdStartDate: orderWindow.startDate,
-          createdEndDate: orderWindow.endDate,
-        }),
+    } else if (mode === 'returns') {
+      const returnWindow = syncWindow(returnRecheckDays);
+      const [activeOrderIds, recentReturns] = await Promise.all([
         getActiveWalmartOrderIds(),
         fetchWalmartReturnPages(accessToken, {
           returnLastModifiedStartDate: returnWindow.startTimestamp,
@@ -259,15 +262,9 @@ export async function GET(request: NextRequest) {
         }),
       ]);
 
-      recentCandidates = recentOrders.length;
       activeCandidates = activeOrderIds.length;
       returnOrders = recentReturns;
       returnCandidates = recentReturns.length;
-      for (const order of recentOrders) {
-        const purchaseOrderId = String(order.purchaseOrderId ?? '').trim();
-        if (purchaseOrderId) orders.set(purchaseOrderId, order);
-      }
-
       const returnPurchaseOrderIds = new Set<string>();
       for (const returnOrder of recentReturns) {
         for (const line of toArray(returnOrder.returnOrderLines)) {
@@ -275,14 +272,38 @@ export async function GET(request: NextRequest) {
           if (purchaseOrderId) returnPurchaseOrderIds.add(purchaseOrderId);
         }
       }
+
       const idsToFetch = Array.from(
         new Set([...activeOrderIds, ...returnPurchaseOrderIds]),
-      ).filter((purchaseOrderId) => !orders.has(purchaseOrderId));
+      );
       const refreshedOrders = await mapWithConcurrency(
         idsToFetch,
-        (purchaseOrderId) => fetchWalmartOrder(accessToken, purchaseOrderId),
+        async (purchaseOrderId) => {
+          try {
+            return await fetchWalmartOrder(accessToken, purchaseOrderId);
+          } catch (error) {
+            console.warn(
+              `[Walmart] No se pudo refrescar la orden historica ${purchaseOrderId}:`,
+              error,
+            );
+            return null;
+          }
+        },
       );
       for (const order of refreshedOrders) {
+        if (!order) continue;
+        const purchaseOrderId = String(order.purchaseOrderId ?? '').trim();
+        if (purchaseOrderId) orders.set(purchaseOrderId, order);
+      }
+    } else {
+      const orderWindow = syncWindow(syncDays);
+      const recentOrders = await fetchWalmartOrderPages(accessToken, {
+        createdStartDate: orderWindow.startDate,
+        createdEndDate: orderWindow.endDate,
+      });
+
+      recentCandidates = recentOrders.length;
+      for (const order of recentOrders) {
         const purchaseOrderId = String(order.purchaseOrderId ?? '').trim();
         if (purchaseOrderId) orders.set(purchaseOrderId, order);
       }
@@ -350,13 +371,18 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
+      mode,
       synchronized: results.length,
       recentCandidates,
       activeCandidates,
       returnCandidates,
       requestedPurchaseOrderId: requestedPurchaseOrderId ?? null,
-      syncDays: requestedPurchaseOrderId ? null : syncDays,
-      returnSyncDays: requestedPurchaseOrderId ? null : returnSyncDays,
+      syncDays:
+        !requestedPurchaseOrderId && mode === 'orders' ? syncDays : null,
+      returnRecheckDays:
+        !requestedPurchaseOrderId && mode === 'returns'
+          ? returnRecheckDays
+          : null,
       results,
       ...(debug ? { diagnostics } : {}),
     });

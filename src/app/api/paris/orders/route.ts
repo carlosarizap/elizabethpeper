@@ -15,16 +15,19 @@ import {
   normalizeMarketplaceOrderItemStatus,
 } from '@/app/lib/orders/order-item-status';
 import { resolveParisOrderStatus } from '@/app/lib/orders/marketplace-status-mappers';
+import { getMarketplaceSyncMode } from '@/app/lib/orders/marketplace-sync';
 import dayjs from 'dayjs';
 import timezone from 'dayjs/plugin/timezone';
 import utc from 'dayjs/plugin/utc';
 import { NextRequest, NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
+
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
 const PARIS_API_URL = 'https://api-developers.ecomm.cencosud.com/v1/orders';
-const PARIS_RETURNED_ITEM_STATUS_ID = '11';
 const PAGE_SIZE = 100;
 const MAX_PAGES = 100;
 
@@ -130,44 +133,43 @@ export async function GET(request: NextRequest) {
   const requestedSubOrderNumber =
     request.nextUrl.searchParams.get('subOrderNumber')?.trim() || undefined;
   const debug = request.nextUrl.searchParams.get('debug') === 'true';
+  const mode = getMarketplaceSyncMode(request.nextUrl.searchParams);
   const syncDays = readDays(process.env.PARIS_SYNC_DAYS, 4);
   const returnRecheckDays = readDays(process.env.PARIS_RETURN_RECHECK_DAYS, 60);
 
   try {
     let recentOrders: ParisOrderPayload[];
-    let returnedOrders: ParisOrderPayload[];
+    let historicalOrders: ParisOrderPayload[];
 
     if (requestedSubOrderNumber) {
       recentOrders = await fetchParisOrders(accessToken, sellerId, {
         subOrderNumber: requestedSubOrderNumber,
       });
-      returnedOrders = [];
+      historicalOrders = [];
+    } else if (mode === 'returns') {
+      const returnWindow = syncWindow(returnRecheckDays);
+      recentOrders = [];
+      historicalOrders = await fetchParisOrders(accessToken, sellerId, {
+        gteUpdatedAt: returnWindow.from,
+        lteUpdatedAt: returnWindow.to,
+      });
     } else {
       const recentWindow = syncWindow(syncDays);
-      const returnWindow = syncWindow(returnRecheckDays);
-
-      [recentOrders, returnedOrders] = await Promise.all([
-        fetchParisOrders(accessToken, sellerId, {
-          gteUpdatedAt: recentWindow.from,
-          lteUpdatedAt: recentWindow.to,
-        }),
-        fetchParisOrders(accessToken, sellerId, {
-          gteUpdatedAt: returnWindow.from,
-          lteUpdatedAt: returnWindow.to,
-          // En el payload vigente, status.id=11 corresponde a `returned`.
-          itemStatus: PARIS_RETURNED_ITEM_STATUS_ID,
-        }),
-      ]);
+      recentOrders = await fetchParisOrders(accessToken, sellerId, {
+        gteUpdatedAt: recentWindow.from,
+        lteUpdatedAt: recentWindow.to,
+      });
+      historicalOrders = [];
     }
 
     const recentCandidates = collectCandidates(
       recentOrders,
       requestedSubOrderNumber,
     );
-    const returnCandidates = collectCandidates(returnedOrders);
+    const historicalCandidates = collectCandidates(historicalOrders);
     const candidates = new Map<string, ParisCandidate>();
 
-    for (const candidate of [...recentCandidates, ...returnCandidates]) {
+    for (const candidate of [...recentCandidates, ...historicalCandidates]) {
       const subOrderNumber = String(candidate.subOrder.subOrderNumber).trim();
       candidates.set(subOrderNumber, candidate);
     }
@@ -245,12 +247,15 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
+      mode,
       synchronized: results.length,
       updatedCandidates: recentCandidates.length,
-      returnCandidates: returnCandidates.length,
+      historicalCandidates: historicalCandidates.length,
+      returnCandidates: historicalCandidates.length,
       requestedSubOrderNumber: requestedSubOrderNumber ?? null,
-      syncDays: requestedSubOrderNumber ? null : syncDays,
-      returnRecheckDays: requestedSubOrderNumber ? null : returnRecheckDays,
+      syncDays: !requestedSubOrderNumber && mode === 'orders' ? syncDays : null,
+      returnRecheckDays:
+        !requestedSubOrderNumber && mode === 'returns' ? returnRecheckDays : null,
       results,
       ...(debug ? { diagnostics } : {}),
     });

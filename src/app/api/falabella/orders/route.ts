@@ -5,8 +5,12 @@ import { MARKETPLACES } from '@/app/lib/constants/marketplaces';
 import { getFalabellaInvoiceData } from '@/app/lib/falabella/invoice-data';
 import { normalizeMarketplaceOrderItemStatus } from '@/app/lib/orders/order-item-status';
 import { normalizeOrderStatus } from '@/app/lib/orders/marketplace-status-mappers';
-import { NextResponse } from 'next/server';
+import { getMarketplaceSyncMode } from '@/app/lib/orders/marketplace-sync';
+import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
+
+export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 
 interface FalabellaOrderItem {
   OrderItemId?: unknown;
@@ -28,6 +32,11 @@ function stringValue(value: unknown): string | null {
 function numericValue(value: unknown, fallback = 0): number {
   const parsed = Number.parseFloat(String(value ?? '').replace(',', ''));
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function readDays(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function getMarketplaceItemId(
@@ -94,9 +103,16 @@ async function fetchOrderItems(
   return (Array.isArray(items) ? items : [items]) as FalabellaOrderItem[];
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const userId = process.env.FALABELLA_USER_ID!;
   const apiKey = process.env.FALABELLA_API_KEY!;
+  const mode = getMarketplaceSyncMode(request.nextUrl.searchParams);
+  const syncDays = readDays(process.env.FALABELLA_SYNC_DAYS, 4);
+  const returnRecheckDays = readDays(
+    process.env.FALABELLA_RETURN_RECHECK_DAYS,
+    60,
+  );
+  const days = mode === 'returns' ? returnRecheckDays : syncDays;
 
   if (!userId || !apiKey) {
     return NextResponse.json({ error: 'Credenciales faltantes' }, { status: 400 });
@@ -111,7 +127,7 @@ export async function GET() {
       UserID: userId,
       Version: '1.0',
       CreatedAfter: new Date(
-        Date.now() - 1000 * 60 * 60 * 24 * 4,
+        Date.now() - 1000 * 60 * 60 * 24 * days,
       ).toISOString(),
     };
     const signature = calculateSignature(baseParams, apiKey);
@@ -201,7 +217,12 @@ export async function GET() {
       synchronizedOrders.push(result);
     }
 
-    return NextResponse.json({ inserted: synchronizedOrders });
+    return NextResponse.json({
+      mode,
+      days,
+      synchronized: synchronizedOrders.length,
+      inserted: synchronizedOrders,
+    });
   } catch (error) {
     console.error('Error en la API de Falabella:', error);
     return NextResponse.json(

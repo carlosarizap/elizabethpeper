@@ -4,7 +4,6 @@ import { NextRequest, NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
-// Alias compatible con el cron anterior. El flujo nuevo usa /api/cron/orders.
 export async function GET(request: NextRequest) {
   const result = await runMarketplaceSync(request.nextUrl.origin, 'orders');
   return NextResponse.json(result, { status: result.success ? 200 : 207 });

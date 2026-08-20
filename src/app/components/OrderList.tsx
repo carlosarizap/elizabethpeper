@@ -33,17 +33,10 @@ const OrderList = () => {
   const importarOrdenes = async () => {
     setImporting(true);
     try {
-      const apis = [
-        "/api/mercadolibre/orders",
-        "/api/falabella/orders",
-        "/api/ripley/orders",
-        "/api/paris/orders",
-        "/api/walmart/orders",
-        "/api/shopify/orders",
-      ];
-
-      for (const api of apis) {
-        await fetch(api);
+      const response = await fetch('/api/cron/orders');
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(`La sincronización respondió ${response.status}`);
       }
 
       await fetchOrders(); // Refrescar las órdenes

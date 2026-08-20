@@ -155,6 +155,35 @@ const WALMART_STATUS_MAP: Readonly<Record<string, StandardOrderStatus>> = {
   canceled: ORDER_STATUSES.CANCELED,
 };
 
+const SHOPIFY_STATUS_MAP: Readonly<Record<string, StandardOrderStatus>> = {
+  unfulfilled: ORDER_STATUSES.PENDING,
+  scheduled: ORDER_STATUSES.PENDING,
+  on_hold: ORDER_STATUSES.PENDING,
+  in_progress: ORDER_STATUSES.PENDING,
+  pending_fulfillment: ORDER_STATUSES.PENDING,
+  open: ORDER_STATUSES.PENDING,
+  request_declined: ORDER_STATUSES.PENDING,
+  partially_fulfilled: ORDER_STATUSES.SHIPPED,
+  fulfilled: ORDER_STATUSES.SHIPPED,
+  restocked: ORDER_STATUSES.CANCELED,
+  cancelled: ORDER_STATUSES.CANCELED,
+  canceled: ORDER_STATUSES.CANCELED,
+  delivered: ORDER_STATUSES.DELIVERED,
+  returned: ORDER_STATUSES.RETURNED,
+};
+
+export function normalizeShopifyOrderStatus(
+  status: string | null | undefined,
+): StandardOrderStatus {
+  const normalizedStatus = status ? normalizeExternalStatus(status) : '';
+  const mappedStatus = SHOPIFY_STATUS_MAP[normalizedStatus];
+  if (!mappedStatus) {
+    console.warn(`[OrderStatus] Estado desconocido para Shopify: ${status}`);
+    return ORDER_STATUSES.PENDING;
+  }
+  return mappedStatus;
+}
+
 export function normalizeWalmartOrderStatus(
   status: string | null | undefined,
 ): StandardOrderStatus {
@@ -194,6 +223,7 @@ const MARKETPLACE_STATUS_MAPPERS: Readonly<
   [MARKETPLACES.PARIS]: normalizeParisOrderStatus,
   [MARKETPLACES.RIPLEY]: normalizeRipleyOrderStatus,
   [MARKETPLACES.WALMART]: normalizeWalmartOrderStatus,
+  [MARKETPLACES.SHOPIFY]: normalizeShopifyOrderStatus,
 };
 
 export function normalizeOrderStatus(

@@ -185,6 +185,11 @@ function walmartTimestamp(value: unknown): dayjs.Dayjs | null {
   return parsed.isValid() ? parsed : null;
 }
 
+export function getWalmartOrderDate(order: WalmartOrder): string | null {
+  const parsed = walmartTimestamp(order.orderDate);
+  return parsed ? parsed.toISOString() : null;
+}
+
 export function getWalmartDeliveryDate(order: WalmartOrder): string | null {
   const candidates = [
     order.shippingInfo?.estimatedDeliveryDate,

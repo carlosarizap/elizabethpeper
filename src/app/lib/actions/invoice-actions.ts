@@ -248,14 +248,16 @@ export async function generateCreditNotes() {
                    SELECT 1
                    FROM order_detail od
                    WHERE od.id_order_header = oh.id
-                     AND od.status = 'devuelto'
+                     AND od.status IN ('devuelto', 'cancelado')
                )
              ORDER BY oh.id ASC
              LIMIT 1`
         );
 
         if (headers.length === 0) {
-            console.log('No hay boletas devueltas pendientes de preparar como Nota de CrÃ©dito.');
+            console.log(
+                'No hay boletas devueltas o canceladas pendientes de preparar como Nota de CrÃ©dito.'
+            );
             return;
         }
 
@@ -267,18 +269,20 @@ export async function generateCreditNotes() {
              ORDER BY id ASC`,
             [header.id]
         );
-        const returnedDetails = details.filter(
-            (detail) => detail.status === 'devuelto'
+        const creditableDetails = details.filter(
+            (detail) => detail.status === 'devuelto' || detail.status === 'cancelado'
         );
 
-        if (returnedDetails.length === 0) {
-            throw new Error(`La orden ${header.order_id} no tiene productos devueltos`);
+        if (creditableDetails.length === 0) {
+            throw new Error(
+                `La orden ${header.order_id} no tiene productos devueltos o cancelados`
+            );
         }
 
         const isTotalReturn = details.every(
-            (detail) => detail.status === 'devuelto'
+            (detail) => detail.status === 'devuelto' || detail.status === 'cancelado'
         );
-        const creditNoteDetails: InvoiceDetail[] = [...returnedDetails];
+        const creditNoteDetails: InvoiceDetail[] = [...creditableDetails];
         const shippingAmount = Number(header.shipping_amount ?? 0);
 
         if (!Number.isFinite(shippingAmount) || shippingAmount < 0) {
@@ -856,7 +860,9 @@ export function splitChileanRut(value: unknown): SplitRut {
         .replace(/\./g, '')
         .replace(/\s+/g, '')
         .toUpperCase();
-    const match = normalized.match(/^(\d{7,8})-([\dK])$/);
+    // Los marketplaces pueden entregar el RUT con guion (76957547-2)
+    // o compacto (769575472). En ambos casos el ultimo caracter es el DV.
+    const match = normalized.match(/^(\d{7,8})-?([\dK])$/);
 
     if (!match) {
         throw new Error(`Formato de RUT invÃ¡lido: ${value}`);

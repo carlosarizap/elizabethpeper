@@ -5,6 +5,7 @@ import {
   expandWalmartOrderLineUnits,
   findWalmartFiscalSignals,
   getWalmartDeliveryDate,
+  getWalmartOrderDate,
   getWalmartLineProductTotal,
   getWalmartMarketplaceItemId,
   getWalmartShippingAmount,
@@ -105,6 +106,13 @@ test('Walmart usa estimatedDeliveryDate en Chile sin sumar dias', () => {
       },
     }),
     '2026-06-04',
+  );
+});
+
+test('Walmart conserva orderDate como fecha real de la venta', () => {
+  assert.equal(
+    getWalmartOrderDate({ orderDate: 1786199590000 }),
+    '2026-08-08T14:33:10.000Z',
   );
 });
 

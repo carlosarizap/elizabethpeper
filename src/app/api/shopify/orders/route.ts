@@ -1,268 +1,305 @@
-import { createOrder } from "@/app/lib/actions/order-actions";
-import { MARKETPLACES } from "@/app/lib/constants/marketplaces";
-import { NextResponse } from "next/server";
+import { upsertShopifyOrder } from '@/app/lib/actions/order-actions';
+import {
+  buildShopifyUpdatedAtSearch,
+  collectShopifyCursorPages,
+  normalizeShopifyOrder,
+  SHOPIFY_ADMIN_API_VERSION,
+  toShopifyOrderGid,
+  type ShopifyOrder,
+} from '@/app/lib/shopify/order-sync';
+import {
+  getShopifyAccessToken,
+  getShopifyGrantedScopes,
+} from '@/app/lib/shopify/token-manager';
+import { NextRequest, NextResponse } from 'next/server';
 
-function calcularFechaEntrega(dateCreated: string): string {
-  const fecha = new Date(dateCreated);
-  fecha.setDate(fecha.getDate() + 1);
+const ORDERS_PAGE_SIZE = 100;
 
-  const diaEntrega = fecha.getDay();
-  if (diaEntrega === 6) fecha.setDate(fecha.getDate() + 2);
-  if (diaEntrega === 0) fecha.setDate(fecha.getDate() + 1);
-
-  return fecha.toISOString().split("T")[0];
+function positiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : fallback;
 }
 
-function getFechaHaceDiasISO(dias: number): string {
-  const fecha = new Date();
-  fecha.setDate(fecha.getDate() - dias);
-  return fecha.toISOString();
-}
-
-function toOrderId(shopifyGid?: string, orderName?: string): string {
-  const numericId = shopifyGid?.split("/").pop() ?? "";
-  if (orderName && numericId) {
-    return `${orderName}-${numericId}`;
-  }
-  return numericId || orderName || "";
-}
-
-type ShopifyOrderEdge = {
-  node?: {
-    id?: string;
-    name?: string;
-    createdAt?: string;
-    updatedAt?: string;
-    displayFulfillmentStatus?: string;
-    totalShippingPriceSet?: {
-      shopMoney?: {
-        amount?: string;
-        currencyCode?: string;
-      };
-    };
-    lineItems?: {
-      edges?: Array<{
-        node?: {
-          title?: string;
-          sku?: string | null;
-          quantity?: number;
-          originalUnitPriceSet?: {
-            shopMoney?: {
-              amount?: string;
-              currencyCode?: string;
-            };
-          };
-        };
-      }>;
-    };
-  };
-};
-
-async function getShopifyAccessToken(): Promise<string> {
+function getShopifyGraphqlUrl(): string {
   const shop = process.env.SHOPIFY_SHOP;
-  const clientId = process.env.SHOPIFY_CLIENT_ID;
-  const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
+  if (!shop) throw new Error('Falta SHOPIFY_SHOP');
+  return `https://${shop}.myshopify.com/admin/api/${SHOPIFY_ADMIN_API_VERSION}/graphql.json`;
+}
 
-  if (!shop || !clientId || !clientSecret) {
-    throw new Error("Faltan credenciales de Shopify");
-  }
-
-  const response = await fetch(`https://${shop}.myshopify.com/admin/oauth/access_token`, {
-    method: "POST",
+async function shopifyGraphQL<T>(
+  accessToken: string,
+  query: string,
+  variables: Record<string, unknown> = {},
+): Promise<T> {
+  const response = await fetch(getShopifyGraphqlUrl(), {
+    method: 'POST',
     headers: {
-      Accept: "application/json",
-      "Content-Type": "application/x-www-form-urlencoded",
+      'Content-Type': 'application/json',
+      'X-Shopify-Access-Token': accessToken,
     },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      grant_type: "client_credentials",
-    }).toString(),
+    body: JSON.stringify({ query, variables }),
   });
-
   const data = await response.json();
-
-  if (!response.ok || !data?.access_token) {
-    throw new Error(`Error token Shopify: ${JSON.stringify(data)}`);
+  if (!response.ok) {
+    throw new Error(`Error Shopify GraphQL ${response.status}: ${JSON.stringify(data)}`);
   }
-
-  return data.access_token as string;
+  if (data?.errors?.length) {
+    throw new Error(`GraphQL errors: ${JSON.stringify(data.errors)}`);
+  }
+  return data.data as T;
 }
 
-async function fetchShopifyOrders(accessToken: string) {
-  const shop = process.env.SHOPIFY_SHOP;
-
-  if (!shop) {
-    throw new Error("Falta SHOPIFY_SHOP");
+const ORDER_CORE_FIELDS = `
+  id
+  name
+  createdAt
+  updatedAt
+  cancelledAt
+  cancellation { staffNote }
+  displayFulfillmentStatus
+  totalShippingPriceSet { shopMoney { amount currencyCode } }
+  currentShippingPriceSet { shopMoney { amount currencyCode } }
+  lineItems(first: 250) {
+    nodes {
+      id
+      title
+      name
+      sku
+      quantity
+      currentQuantity
+      unfulfilledQuantity
+      refundableQuantity
+      discountedUnitPriceAfterAllDiscountsSet { shopMoney { amount currencyCode } }
+      discountedTotalSet(withCodeDiscounts: true) { shopMoney { amount currencyCode } }
+      originalTotalSet { shopMoney { amount currencyCode } }
+      totalDiscountSet { shopMoney { amount currencyCode } }
+    }
   }
+  fulfillments(first: 100) {
+    id
+    status
+    displayStatus
+    createdAt
+    updatedAt
+    deliveredAt
+    inTransitAt
+    estimatedDeliveryAt
+    fulfillmentLineItems(first: 250) {
+      nodes { quantity lineItem { id } }
+    }
+    events(first: 100) {
+      nodes { status happenedAt estimatedDeliveryAt }
+    }
+  }
+`;
 
-  const createdAtMin = getFechaHaceDiasISO(6);
+function refundFields(includeReturns: boolean): string {
+  return `
+  refunds(first: 100) {
+    id
+    createdAt
+    updatedAt
+    ${includeReturns ? 'return { id status }' : ''}
+    refundLineItems(first: 250) {
+      nodes { id quantity restockType lineItem { id } }
+    }
+  }
+`;
+}
 
-  const query = `
-    query GetOrders($q: String!) {
-      orders(first: 50, query: $q, sortKey: CREATED_AT, reverse: true) {
-        edges {
-          node {
+const RETURNS_FIELDS = `
+  returns(first: 100) {
+    nodes {
+      id
+      status
+      createdAt
+      closedAt
+      returnLineItems(first: 250) {
+        nodes {
+          __typename
+          ... on ReturnLineItem {
             id
-            name
-            createdAt
-            updatedAt
-            displayFulfillmentStatus
-            totalShippingPriceSet {
-              shopMoney {
-                amount
-                currencyCode
-              }
-            }
-            lineItems(first: 100) {
-              edges {
-                node {
-                  title
-                  sku
-                  quantity
-                  originalUnitPriceSet {
-                    shopMoney {
-                      amount
-                      currencyCode
-                    }
-                  }
-                }
-              }
-            }
+            quantity
+            processedQuantity
+            refundedQuantity
+            processableQuantity
+            unprocessedQuantity
+            fulfillmentLineItem { id lineItem { id } }
           }
         }
       }
     }
-  `;
+  }
+`;
 
-  const variables = {
-    q: `created_at:>=${createdAtMin}`,
-  };
-
-  const response = await fetch(
-    `https://${shop}.myshopify.com/admin/api/2026-01/graphql.json`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": accessToken,
-      },
-      body: JSON.stringify({ query, variables }),
+function orderDetailQuery(includeReturns: boolean): string {
+  return `
+    query ShopifyOrder($id: ID!) {
+      order(id: $id) {
+        ${ORDER_CORE_FIELDS}
+        ${refundFields(includeReturns)}
+        ${includeReturns ? RETURNS_FIELDS : ''}
+      }
     }
-  );
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(`Error Shopify GraphQL: ${JSON.stringify(data)}`);
-  }
-
-  if (data?.errors?.length) {
-    throw new Error(`GraphQL errors: ${JSON.stringify(data.errors)}`);
-  }
-
-  return data;
+  `;
 }
 
-export async function GET() {
-  try {
-    const accessToken = await getShopifyAccessToken();
-    const data = await fetchShopifyOrders(accessToken);
-
-    const orderEdges: ShopifyOrderEdge[] = data?.data?.orders?.edges ?? [];
-    const insertedOrders = [];
-
-    for (const edge of orderEdges) {
-      const order = edge.node;
-      if (!order) continue;
-
-      const orderId = toOrderId(order.id, order.name);
-      if (!orderId) continue;
-
-      const shippingAmount = Number(
-        order.totalShippingPriceSet?.shopMoney?.amount ?? 0
-      );
-
-      const deliveryDate = order.createdAt
-        ? calcularFechaEntrega(order.createdAt)
-        : undefined;
-
-      const status = order.displayFulfillmentStatus ?? "UNKNOWN";
-      const documentType: "boleta" | "factura" = "boleta";
-
-      const lineEdges = order.lineItems?.edges ?? [];
-
-      const groupedItems = new Map<
-        string,
-        {
-          productTitle: string;
-          totalQuantity: number;
-          totalProductAmount: number;
-        }
-      >();
-
-      for (const lineEdge of lineEdges) {
-        const line = lineEdge.node;
-        if (!line) continue;
-
-        const productTitle = line.title ?? "Sin título";
-        const sku = line.sku ?? "SIN-SKU";
-        const quantity = Number(line.quantity ?? 1);
-        const unitPrice = Number(
-          line.originalUnitPriceSet?.shopMoney?.amount ?? 0
-        );
-
-        const key = `${sku}||${productTitle}`;
-
-        if (!groupedItems.has(key)) {
-          groupedItems.set(key, {
-            productTitle,
-            totalQuantity: 0,
-            totalProductAmount: 0,
-          });
-        }
-
-        const current = groupedItems.get(key)!;
-        current.totalQuantity += quantity;
-        current.totalProductAmount += unitPrice * quantity;
+async function fetchOrderGidsForPeriod(accessToken: string) {
+  const query = `
+    query ShopifyUpdatedOrders($query: String!, $cursor: String) {
+      orders(
+        first: ${ORDERS_PAGE_SIZE},
+        after: $cursor,
+        query: $query,
+        sortKey: UPDATED_AT,
+        reverse: false
+      ) {
+        nodes { id }
+        pageInfo { hasNextPage endCursor }
       }
+    }
+  `;
+  const search = buildShopifyUpdatedAtSearch(
+    positiveInteger(process.env.SHOPIFY_SYNC_DAYS, 4),
+  );
+  const paginated = await collectShopifyCursorPages(async (cursor) => {
+    const data: {
+      orders?: {
+        nodes?: Array<{ id?: string | null }>;
+        pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+      };
+    } = await shopifyGraphQL(accessToken, query, { query: search, cursor });
+    const pageInfo = data.orders?.pageInfo;
+    return {
+      nodes: (data.orders?.nodes ?? [])
+        .map((order) => order.id?.trim() ?? '')
+        .filter(Boolean),
+      hasNextPage: Boolean(pageInfo?.hasNextPage),
+      endCursor: pageInfo?.endCursor ?? null,
+    };
+  });
+  return {
+    ids: Array.from(new Set(paginated.nodes)),
+    pages: paginated.pages,
+    search,
+  };
+}
 
-      for (const [, itemData] of groupedItems.entries()) {
-        const productPrice =
-          itemData.totalQuantity > 0
-            ? Math.round(itemData.totalProductAmount / itemData.totalQuantity)
-            : 0;
+async function resolveDirectedOrderGid(
+  accessToken: string,
+  requestedOrderId: string,
+): Promise<string | null> {
+  const directGid = toShopifyOrderGid(requestedOrderId);
+  if (directGid) return directGid;
+  const query = `
+    query FindShopifyOrder($query: String!) {
+      orders(first: 10, query: $query) { nodes { id name } }
+    }
+  `;
+  const data = await shopifyGraphQL<{
+    orders?: { nodes?: Array<{ id?: string | null; name?: string | null }> };
+  }>(accessToken, query, { query: `name:${requestedOrderId}` });
+  const exact = (data.orders?.nodes ?? []).find(
+    (order) => order.name === requestedOrderId,
+  );
+  return exact?.id?.trim() || data.orders?.nodes?.[0]?.id?.trim() || null;
+}
 
-        const result = await createOrder({
-          orderId,
-          shippingAmount,
-          status,
-          marketplace: MARKETPLACES.SHOPIFY,
-          documentType,
-          productTitle: itemData.productTitle,
-          productQuantity: itemData.totalQuantity,
-          productPrice,
-          deliveryDate,
+async function fetchShopifyOrder(
+  accessToken: string,
+  gid: string,
+  includeReturns: boolean,
+): Promise<ShopifyOrder | null> {
+  const data = await shopifyGraphQL<{ order?: ShopifyOrder | null }>(
+    accessToken,
+    orderDetailQuery(includeReturns),
+    { id: gid },
+  );
+  return data.order ?? null;
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const requestedOrderId = request.nextUrl.searchParams.get('orderId')?.trim() || null;
+    const accessToken = await getShopifyAccessToken();
+    const scopes = await getShopifyGrantedScopes(accessToken);
+    if (!scopes.has('read_orders') && !scopes.has('write_orders')) {
+      throw new Error('La app Shopify no tiene read_orders ni write_orders');
+    }
+
+    const includeReturns = scopes.has('read_returns');
+    if (!includeReturns) {
+      console.warn(
+        '[Shopify][Returns] Falta el scope read_returns; se sincronizaran ordenes, fulfillments y refunds sin marcar devoluciones fisicas.',
+      );
+    }
+    if (!scopes.has('read_all_orders')) {
+      console.warn(
+        '[Shopify][Orders] Falta read_all_orders; Shopify limita por defecto el acceso a ordenes creadas en los ultimos 60 dias.',
+      );
+    }
+
+    let orderGids: string[];
+    let pages = 1;
+    let search: string | null = null;
+    if (requestedOrderId) {
+      const gid = await resolveDirectedOrderGid(accessToken, requestedOrderId);
+      if (!gid) {
+        return NextResponse.json(
+          { error: `No se encontró la orden Shopify ${requestedOrderId}` },
+          { status: 404 },
+        );
+      }
+      orderGids = [gid];
+    } else {
+      const period = await fetchOrderGidsForPeriod(accessToken);
+      orderGids = period.ids;
+      pages = period.pages;
+      search = period.search;
+    }
+
+    const results = [];
+    for (const gid of orderGids) {
+      try {
+        const rawOrder = await fetchShopifyOrder(accessToken, gid, includeReturns);
+        if (!rawOrder) {
+          results.push({ success: false, gid, error: 'Orden no accesible o inexistente' });
+          continue;
+        }
+        const normalized = normalizeShopifyOrder(rawOrder);
+        const result = await upsertShopifyOrder(normalized);
+        results.push({ ...result, orderId: normalized.orderId });
+      } catch (error) {
+        console.error(`[Shopify] Error al sincronizar ${gid}:`, error);
+        results.push({
+          success: false,
+          gid,
+          error: error instanceof Error ? error.message : 'Error desconocido',
         });
-
-        insertedOrders.push(result);
       }
     }
 
     return NextResponse.json({
-      inserted: insertedOrders,
-      totalOrders: orderEdges.length,
+      synchronized: results.filter((result) => 'success' in result && result.success).length,
+      candidates: orderGids.length,
+      requestedOrderId,
+      apiVersion: SHOPIFY_ADMIN_API_VERSION,
+      pagination: { pages, search },
+      returns: {
+        status: includeReturns ? 'enabled' : 'disabled_missing_scope',
+        requiredScope: 'read_returns',
+      },
+      oldOrders: {
+        status: scopes.has('read_all_orders') ? 'enabled' : 'limited_to_60_days',
+        optionalScope: 'read_all_orders',
+      },
+      results,
     });
   } catch (error) {
-    console.error("Error en la API de Shopify:", error);
+    console.error('Error en la API de Shopify:', error);
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Error en la API de Shopify",
-      },
-      { status: 500 }
+      { error: error instanceof Error ? error.message : 'Error en la API de Shopify' },
+      { status: 500 },
     );
   }
 }

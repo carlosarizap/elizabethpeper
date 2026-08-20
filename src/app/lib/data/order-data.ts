@@ -4,6 +4,13 @@ import { OrderHeader } from '../definitions/order_header';
 
 const ITEMS_PER_PAGE = 150;
 const ORDERS_VIEW_LIMIT = 300;
+const DASHBOARD_VALID_ORDER_FILTER = `
+  COALESCE(oh.status, '') NOT IN ('cancelado', 'devuelto')
+  AND COALESCE(oh.return_status, 'sin_devolucion') NOT IN (
+    'devolucion_parcial',
+    'devolucion_total'
+  )
+`;
 
 function appendGroupedDetail(
   order: OrderHeader,
@@ -387,7 +394,9 @@ export async function fetchOrderStatsByMonth(year: number, month: number) {
         SUM(oh.total_amount) AS total_ventas,
         COUNT(*) AS total_ordenes
       FROM order_header oh
-      WHERE EXTRACT(YEAR FROM oh.created_at) = $1 AND EXTRACT(MONTH FROM oh.created_at) = $2
+      WHERE EXTRACT(YEAR FROM oh.created_at) = $1
+        AND EXTRACT(MONTH FROM oh.created_at) = $2
+        AND ${DASHBOARD_VALID_ORDER_FILTER}
       GROUP BY oh.marketplace
     `, [year, month]);
 
@@ -398,7 +407,9 @@ export async function fetchOrderStatsByMonth(year: number, month: number) {
         SUM(od.product_quantity) AS cantidad_total
       FROM order_detail od
       JOIN order_header oh ON od.id_order_header = oh.id
-      WHERE EXTRACT(YEAR FROM oh.created_at) = $1 AND EXTRACT(MONTH FROM oh.created_at) = $2
+      WHERE EXTRACT(YEAR FROM oh.created_at) = $1
+        AND EXTRACT(MONTH FROM oh.created_at) = $2
+        AND ${DASHBOARD_VALID_ORDER_FILTER}
       GROUP BY od.product_title
       ORDER BY cantidad_total DESC
       LIMIT 5
@@ -414,7 +425,8 @@ export async function fetchOrderStatsByMonth(year: number, month: number) {
       WHERE 
         EXTRACT(YEAR FROM oh.created_at) = $1 AND 
         EXTRACT(MONTH FROM oh.created_at) = $2 AND 
-        LOWER(od.product_title) LIKE '%relleno%'
+        LOWER(od.product_title) LIKE '%relleno%' AND
+        ${DASHBOARD_VALID_ORDER_FILTER}
       GROUP BY medida
     `, [year, month]);
 

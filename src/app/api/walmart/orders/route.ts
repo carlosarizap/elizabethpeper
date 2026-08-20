@@ -7,6 +7,7 @@ import {
   expandWalmartOrderLineUnits,
   findWalmartFiscalSignals,
   getWalmartDeliveryDate,
+  getWalmartOrderDate,
   getWalmartRawLineStatuses,
   getWalmartShippingAmount,
   normalizeWalmartCursor,
@@ -306,6 +307,7 @@ export async function GET(request: NextRequest) {
       );
       const result = await upsertWalmartOrder({
         orderId: purchaseOrderId,
+        orderDate: getWalmartOrderDate(order),
         shippingAmount: getWalmartShippingAmount(order),
         status: normalizedOrderStatus,
         deliveryDate: getWalmartDeliveryDate(order),
@@ -325,6 +327,7 @@ export async function GET(request: NextRequest) {
           fiscalSignals: findWalmartFiscalSignals(order),
           kycDetailsPresent: order.kycDetails != null,
           shippingAmount: getWalmartShippingAmount(order),
+          orderDate: getWalmartOrderDate(order),
           deliveryDate: getWalmartDeliveryDate(order),
           items: items.map((item) => {
             const baseItemId = item.marketplaceItemId.split(':unit:')[0];

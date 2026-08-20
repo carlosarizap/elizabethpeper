@@ -108,6 +108,28 @@ const WALMART_ORDER_ITEM_STATUS_MAP: Readonly<
   canceled: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
 };
 
+const SHOPIFY_ORDER_ITEM_STATUS_MAP: Readonly<
+  Record<string, StandardOrderItemStatus>
+> = {
+  unfulfilled: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  scheduled: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  on_hold: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  in_progress: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  pending_fulfillment: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  open: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  request_declined: STANDARD_ORDER_ITEM_STATUSES.PENDING,
+  partially_fulfilled: STANDARD_ORDER_ITEM_STATUSES.SHIPPED,
+  fulfilled: STANDARD_ORDER_ITEM_STATUSES.SHIPPED,
+  success: STANDARD_ORDER_ITEM_STATUSES.SHIPPED,
+  in_transit: STANDARD_ORDER_ITEM_STATUSES.SHIPPED,
+  out_for_delivery: STANDARD_ORDER_ITEM_STATUSES.SHIPPED,
+  delivered: STANDARD_ORDER_ITEM_STATUSES.DELIVERED,
+  restocked: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
+  cancelled: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
+  canceled: STANDARD_ORDER_ITEM_STATUSES.CANCELED,
+  return_closed: STANDARD_ORDER_ITEM_STATUSES.RETURNED,
+};
+
 function normalizeRawStatus(value: unknown): string {
   return typeof value === 'string' ? normalizeExternalStatus(value) : '';
 }
@@ -189,6 +211,18 @@ export function normalizeMarketplaceOrderItemStatus(
       return STANDARD_ORDER_ITEM_STATUSES.PENDING;
     }
 
+    return mappedStatus;
+  }
+
+  if (marketplace === MARKETPLACES.SHOPIFY) {
+    const normalizedStatus = normalizeRawStatus(rawStatus);
+    const mappedStatus = SHOPIFY_ORDER_ITEM_STATUS_MAP[normalizedStatus];
+    if (!mappedStatus) {
+      console.warn(
+        `[OrderItemStatus] Estado desconocido para Shopify: ${String(rawStatus)}`,
+      );
+      return STANDARD_ORDER_ITEM_STATUSES.PENDING;
+    }
     return mappedStatus;
   }
 

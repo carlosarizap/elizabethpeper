@@ -13,7 +13,8 @@ export async function GET(request: Request) {
   try {
     const stats = await fetchOrderStatsByMonth(year, month);
     return NextResponse.json(stats);
-  } catch {
+  } catch (error) {
+    console.error('Error en /api/orders/stats:', error);
     return NextResponse.json({ error: 'Error al obtener estadísticas' }, { status: 500 });
   }
 }

@@ -25,6 +25,24 @@ export function buildMarketplaceSyncUrl(
   return url.toString();
 }
 
+export function marketplacePayloadHasFailures(payload: unknown): boolean {
+  if (!payload || typeof payload !== 'object') {
+    return false;
+  }
+
+  const results = (payload as { results?: unknown }).results;
+  if (!Array.isArray(results)) {
+    return false;
+  }
+
+  return results.some(
+    (result) =>
+      Boolean(result) &&
+      typeof result === 'object' &&
+      (result as { success?: unknown }).success === false,
+  );
+}
+
 export async function runMarketplaceSync(
   origin: string,
   mode: MarketplaceSyncMode,
@@ -39,7 +57,7 @@ export async function runMarketplaceSync(
         const payload = await response.json().catch(() => null);
         return {
           path,
-          ok: response.ok,
+          ok: response.ok && !marketplacePayloadHasFailures(payload),
           status: response.status,
           payload,
         };

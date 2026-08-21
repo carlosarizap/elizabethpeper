@@ -1,5 +1,3 @@
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
 import { NextResponse } from 'next/server';
 import { fetchOrders } from '@/app/lib/data/order-data'; // o donde tengas ese método
 

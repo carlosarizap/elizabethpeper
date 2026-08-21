@@ -1,5 +1,3 @@
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-
 import { upsertFalabellaOrder } from '@/app/lib/actions/order-actions';
 import { MARKETPLACES } from '@/app/lib/constants/marketplaces';
 import { getFalabellaInvoiceData } from '@/app/lib/falabella/invoice-data';

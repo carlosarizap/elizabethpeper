@@ -1,5 +1,3 @@
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
 import { getOrderInvoiceById } from '@/app/lib/data/order-data';
 import { NextResponse, NextRequest } from 'next/server';
 

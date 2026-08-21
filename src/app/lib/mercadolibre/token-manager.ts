@@ -1,5 +1,3 @@
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
 import pool from "@/app/lib/db";
 import { CheckBadgeIcon } from "@heroicons/react/24/solid";
 

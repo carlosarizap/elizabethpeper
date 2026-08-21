@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import {
   ChartBarIcon,
   ClipboardDocumentListIcon,
+  ArrowRightStartOnRectangleIcon,
   ListBulletIcon,
 } from '@heroicons/react/24/solid';
 import clsx from 'clsx';
@@ -30,6 +31,13 @@ const navItems = [
 
 export default function Navbar() {
   const pathname = usePathname();
+
+  if (pathname === '/login') return null;
+
+  const logout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.assign('/login');
+  };
 
   return (
     <nav className="bg-white shadow-md border-b px-6 py-3 print:hidden">
@@ -57,14 +65,22 @@ export default function Navbar() {
           })}
         </ul>
 
-        {/* Logo a la derecha */}
-        <div className="hidden sm:block">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={logout}
+            className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-gray-600 transition hover:bg-red-50 hover:text-red-600"
+            title="Cerrar sesión"
+          >
+            <ArrowRightStartOnRectangleIcon className="h-5 w-5" />
+            <span className="hidden md:inline">Salir</span>
+          </button>
           <Image
             src="/logo.png" // Asegúrate de tener tu logo en public/logo.png
             alt="Logo Empresa"
             width={40}
             height={40}
-            className="rounded-full border border-gray-300"
+            className="hidden rounded-full border border-gray-300 sm:block"
           />
         </div>
       </div>

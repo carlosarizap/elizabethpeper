@@ -1,3 +1,5 @@
+import { createInternalSessionToken } from '../auth/session.ts';
+
 export const MARKETPLACE_ORDER_ENDPOINTS = [
   '/api/mercadolibre/orders',
   '/api/falabella/orders',
@@ -47,12 +49,16 @@ export async function runMarketplaceSync(
   origin: string,
   mode: MarketplaceSyncMode,
 ) {
+  const internalSession = await createInternalSessionToken();
   const results = await Promise.all(
     MARKETPLACE_ORDER_ENDPOINTS.map(async (path) => {
       try {
         const response = await fetch(
           buildMarketplaceSyncUrl(origin, path, mode),
-          { cache: 'no-store' },
+          {
+            cache: 'no-store',
+            headers: { 'x-internal-session': internalSession },
+          },
         );
         const payload = await response.json().catch(() => null);
         return {

@@ -153,7 +153,19 @@ test('Ripley calcula precio unitario y despacho del comprador', () => {
   assert.equal(getRipleyShippingAmount({ shipping_price: 8879 }), 8879);
 });
 
-test('Ripley prefiere delivery_date y luego commiteddate', () => {
+test('Ripley prioriza el compromiso seller en la fecha calendario de Chile', () => {
+  assert.equal(
+    getRipleyDeliveryDate({
+      shipping_deadline: '2026-08-25T03:59:59.999Z',
+      delivery_date: null,
+      created_date: '2026-08-22T18:34:57Z',
+      order_additional_fields: [{ code: 'commiteddate', value: '2026-08-26T16:00:00Z' }],
+    }),
+    '2026-08-24',
+  );
+});
+
+test('Ripley usa delivery_date y luego commiteddate si no hay compromiso seller', () => {
   assert.equal(
     getRipleyDeliveryDate({
       delivery_date: '2026-08-20T16:00:00Z',

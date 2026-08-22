@@ -339,6 +339,24 @@ function dateOnly(value: unknown): string | null {
     : match[1];
 }
 
+function chileDateOnly(value: unknown): string | null {
+  const cleaned = cleanNullableString(value);
+  if (!cleaned) return null;
+
+  const date = new Date(cleaned);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Santiago',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
 export function calculateRipleyFallbackDeliveryDate(
   createdDate: unknown,
 ): string | null {
@@ -354,6 +372,12 @@ export function calculateRipleyFallbackDeliveryDate(
 }
 
 export function getRipleyDeliveryDate(order: RipleyOrder): string | null {
+  // Mirakl informa el "Compromiso seller" como un instante UTC al final del
+  // día chileno. Debe convertirse a la fecha calendario de Chile antes de
+  // guardarlo (por ejemplo, 25T03:59:59Z corresponde al 24 en Chile).
+  const shippingDeadline = chileDateOnly(order.shipping_deadline);
+  if (shippingDeadline) return shippingDeadline;
+
   const apiDeliveryDate = dateOnly(order.delivery_date);
   if (apiDeliveryDate) return apiDeliveryDate;
 

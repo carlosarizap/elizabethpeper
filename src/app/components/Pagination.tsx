@@ -8,27 +8,35 @@ interface Props {
 
 const Pagination = ({ currentPage, totalPages, onPageChange }: Props) => {
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-white flex justify-center items-center gap-6 py-3 shadow-md z-50">
+    <nav
+      aria-label="Paginación de órdenes"
+      className="flex flex-col items-center justify-between gap-3 border-t border-slate-200 bg-slate-50/70 px-4 py-4 sm:flex-row sm:px-6"
+    >
+      <p className="text-sm text-slate-500">
+        Página <span className="font-semibold text-slate-800">{currentPage}</span> de{" "}
+        <span className="font-semibold text-slate-800">{totalPages}</span>
+      </p>
+
+      <div className="flex items-center gap-2">
       <button
         onClick={() => onPageChange(currentPage - 1)}
         disabled={currentPage === 1}
-        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md shadow hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+        className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-blue-300 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        <ChevronLeftIcon className="w-5 h-5" />
+        <ChevronLeftIcon className="h-4 w-4" />
+        Anterior
       </button>
-
-      <span className="text-black font-semibold text-sm sm:text-base">
-        Página {currentPage} de {totalPages}
-      </span>
 
       <button
         onClick={() => onPageChange(currentPage + 1)}
         disabled={currentPage === totalPages}
-        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md shadow hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+        className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        <ChevronRightIcon className="w-5 h-5" />
+        Siguiente
+        <ChevronRightIcon className="h-4 w-4" />
       </button>
-    </div>
+      </div>
+    </nav>
   );
 };
 

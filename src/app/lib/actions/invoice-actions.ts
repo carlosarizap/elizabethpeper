@@ -250,8 +250,7 @@ export async function generateCreditNotes() {
                    WHERE od.id_order_header = oh.id
                      AND od.status IN ('devuelto', 'cancelado')
                )
-             ORDER BY oh.id ASC
-             LIMIT 1`
+             ORDER BY oh.id ASC`
         );
 
         if (headers.length === 0) {
@@ -261,49 +260,6 @@ export async function generateCreditNotes() {
             return;
         }
 
-        const header = headers[0];
-        const { rows: details } = await client.query<CreditNoteDetail>(
-            `SELECT *
-             FROM order_detail
-             WHERE id_order_header = $1
-             ORDER BY id ASC`,
-            [header.id]
-        );
-        const creditableDetails = details.filter(
-            (detail) => detail.status === 'devuelto' || detail.status === 'cancelado'
-        );
-
-        if (creditableDetails.length === 0) {
-            throw new Error(
-                `La orden ${header.order_id} no tiene productos devueltos o cancelados`
-            );
-        }
-
-        const isTotalReturn = details.every(
-            (detail) => detail.status === 'devuelto' || detail.status === 'cancelado'
-        );
-        const creditNoteDetails: InvoiceDetail[] = [...creditableDetails];
-        const shippingAmount = Number(header.shipping_amount ?? 0);
-
-        if (!Number.isFinite(shippingAmount) || shippingAmount < 0) {
-            throw new Error(
-                `La orden ${header.order_id} tiene un monto de envio invalido`
-            );
-        }
-        if (isTotalReturn && shippingAmount > 0) {
-            creditNoteDetails.push({
-                product_title: 'Envio',
-                product_quantity: 1,
-                product_price: shippingAmount
-            });
-        }
-
-        if (creditNoteDetails.length > 10) {
-            throw new Error(
-                `La orden ${header.order_id} requiere ${creditNoteDetails.length} lineas para la Nota de Credito. ` +
-                'El formulario del SII permite un mÃ¡ximo de 10.'
-            );
-        }
         const receiverRutValue = process.env.SII_COMPANY_RUT;
         if (!receiverRutValue) {
             throw new Error(
@@ -326,25 +282,71 @@ export async function generateCreditNotes() {
             .build();
 
         await loginSiiFactura(driver);
-        await driver.get(SII_NEW_CREDIT_NOTE_URL);
-        await driver.wait(
-            until.elementLocated(By.name('EFXP_RUT_RECEP')),
-            20000
-        );
 
-        await fillSiiCreditNoteForm(
-            driver,
-            header,
-            creditNoteDetails,
-            receiverRut,
-            isTotalReturn
-        );
+        for (const header of headers) {
+            const { rows: details } = await client.query<CreditNoteDetail>(
+                `SELECT *
+                 FROM order_detail
+                 WHERE id_order_header = $1
+                 ORDER BY id ASC`,
+                [header.id]
+            );
+            const creditableDetails = details.filter(
+                (detail) => detail.status === 'devuelto' || detail.status === 'cancelado'
+            );
 
-        await signDownloadAndSaveCreditNote(driver, client, header);
+            if (creditableDetails.length === 0) {
+                throw new Error(
+                    `La orden ${header.order_id} no tiene productos devueltos o cancelados`
+                );
+            }
 
-        console.log(
-            `Nota de Credito de la orden ${header.order_id} emitida y guardada correctamente.`
-        );
+            const isTotalReturn = details.every(
+                (detail) => detail.status === 'devuelto' || detail.status === 'cancelado'
+            );
+            const creditNoteDetails: InvoiceDetail[] = [...creditableDetails];
+            const shippingAmount = Number(header.shipping_amount ?? 0);
+
+            if (!Number.isFinite(shippingAmount) || shippingAmount < 0) {
+                throw new Error(
+                    `La orden ${header.order_id} tiene un monto de envio invalido`
+                );
+            }
+            if (isTotalReturn && shippingAmount > 0) {
+                creditNoteDetails.push({
+                    product_title: 'Envio',
+                    product_quantity: 1,
+                    product_price: shippingAmount
+                });
+            }
+
+            if (creditNoteDetails.length > 10) {
+                throw new Error(
+                    `La orden ${header.order_id} requiere ${creditNoteDetails.length} lineas para la Nota de Credito. ` +
+                    'El formulario del SII permite un mÃ¡ximo de 10.'
+                );
+            }
+
+            await driver.get(SII_NEW_CREDIT_NOTE_URL);
+            await driver.wait(
+                until.elementLocated(By.name('EFXP_RUT_RECEP')),
+                20000
+            );
+
+            await fillSiiCreditNoteForm(
+                driver,
+                header,
+                creditNoteDetails,
+                receiverRut,
+                isTotalReturn
+            );
+
+            await signDownloadAndSaveCreditNote(driver, client, header);
+
+            console.log(
+                `Nota de Credito de la orden ${header.order_id} emitida y guardada correctamente.`
+            );
+        }
     } catch (error) {
         console.error('Error durante la emision de la Nota de Credito:', error);
         throw error;

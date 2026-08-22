@@ -16,7 +16,10 @@ import {
   type WalmartOrder,
   type WalmartReturnOrder,
 } from '@/app/lib/walmart/order-sync';
-import { getMarketplaceSyncMode } from '@/app/lib/orders/marketplace-sync';
+import {
+  getMarketplaceSyncDays,
+  getMarketplaceSyncMode,
+} from '@/app/lib/orders/marketplace-sync';
 import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -232,9 +235,9 @@ export async function GET(request: NextRequest) {
   const debug = request.nextUrl.searchParams.get('debug') === 'true';
   const mode = getMarketplaceSyncMode(request.nextUrl.searchParams);
   const syncDays = readDays(process.env.WALMART_SYNC_DAYS, 4);
-  const returnRecheckDays = readDays(
-    process.env.WALMART_RETURN_RECHECK_DAYS,
-    60,
+  const returnRecheckDays = getMarketplaceSyncDays(
+    request.nextUrl.searchParams,
+    readDays(process.env.WALMART_RETURN_RECHECK_DAYS, 60),
   );
 
   try {

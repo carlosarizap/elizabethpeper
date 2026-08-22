@@ -5,6 +5,8 @@ import { Marketplace } from "../lib/constants/marketplaces";
 import { ArrowPathIcon } from "@heroicons/react/24/solid";
 import { OrderHeader } from "../lib/definitions/order_header";
 import LoadingSpinner from "../components/LoadingSpinner";
+import OrderStatusBadge from "../components/OrderStatusBadge";
+import StatusRefreshToast, { ToastFeedback } from "../components/StatusRefreshToast";
 
 const getMarketplaceLogo = (marketplace: Marketplace) => {
   return `/marketplaces/${marketplace}.png`;
@@ -16,13 +18,17 @@ const OrderList = () => {
 
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
+  const [refreshingStatuses, setRefreshingStatuses] = useState(false);
+  const [statusToast, setStatusToast] = useState<ToastFeedback | null>(null);
 
   const fetchOrders = async () => {
     try {
       const res = await fetch("/api/orders");
       const data = await res.json();
-      setOrders(data.orders || []);
+      const fetchedOrders = data.orders || [];
+      setOrders(fetchedOrders);
       setRellenos(data.rellenos || {});
+      return fetchedOrders as OrderHeader[];
     } catch (error) {
       console.error("Error al cargar órdenes:", error);
     } finally {
@@ -32,18 +38,82 @@ const OrderList = () => {
 
   const importarOrdenes = async () => {
     setImporting(true);
+    setStatusToast(null);
     try {
       const response = await fetch('/api/cron/orders');
       const result = await response.json();
+      const insertedOrders = Number(result?.insertedOrders ?? 0);
+      const insertSummary = insertedOrders === 1
+        ? 'Se agregó 1 orden nueva.'
+        : `Se agregaron ${insertedOrders} órdenes nuevas.`;
+
       if (!response.ok || !result.success) {
-        throw new Error(`La sincronización respondió ${response.status}`);
+        setStatusToast({
+          kind: 'warning',
+          title: 'Actualización de órdenes',
+          text: `${insertSummary} La sincronización terminó con incidencias en uno o más marketplaces.`,
+        });
+      } else {
+        setStatusToast({
+          kind: 'success',
+          title: 'Actualización de órdenes',
+          text: insertSummary,
+        });
       }
 
       await fetchOrders(); // Refrescar las órdenes
     } catch (error) {
       console.error("Error importando órdenes:", error);
+      setStatusToast({
+        kind: 'error',
+        title: 'Actualización de órdenes',
+        text: 'No fue posible completar la actualización de órdenes.',
+      });
     } finally {
       setImporting(false);
+    }
+  };
+
+  const refreshOrderStatuses = async () => {
+    setRefreshingStatuses(true);
+    setStatusToast(null);
+    try {
+      const response = await fetch('/api/cron/statuses', {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderHeaderIds: orders.map((order) => order.id),
+        }),
+      });
+      const result = await response.json();
+      const changedOrders = Number(result?.changedOrders ?? 0);
+      const changeSummary = changedOrders === 1
+        ? '1 orden cambió de estado.'
+        : `${changedOrders} órdenes cambiaron de estado.`;
+      const checkedOrders = Number(result?.checkedOrders ?? orders.length);
+      const checkedSummary = checkedOrders === 1
+        ? 'Se revisó la orden visible.'
+        : `Se revisaron ${checkedOrders} órdenes visibles.`;
+
+      if (!response.ok || !result.success) {
+        setStatusToast({
+          kind: 'warning',
+          text: `${checkedSummary} ${changeSummary} La revisión terminó con incidencias en uno o más marketplaces.`,
+        });
+      } else {
+        setStatusToast({ kind: 'success', text: `${checkedSummary} ${changeSummary}` });
+      }
+
+      await fetchOrders();
+    } catch (error) {
+      console.error('Error actualizando estados:', error);
+      setStatusToast({
+        kind: 'error',
+        text: 'No fue posible completar la actualización de estados.',
+      });
+    } finally {
+      setRefreshingStatuses(false);
     }
   };
 
@@ -67,16 +137,29 @@ const OrderList = () => {
           height={70}
           className="rounded-full border border-gray-300"
         />
-        <button
-          onClick={importarOrdenes}
-          disabled={importing}
-          className="flex items-center gap-2 bg-blue-600 text-white text-sm px-4 py-2 rounded shadow hover:bg-blue-700 disabled:opacity-50 font-semibold print:hidden"
-        >
-          <ArrowPathIcon
-            className={`w-5 h-5 ${importing ? "animate-spin" : ""}`}
-          />
-          {importing ? "Importando..." : "Refrescar"}
-        </button>
+        <div className="flex flex-col gap-2 sm:flex-row print:hidden">
+          <button
+            onClick={importarOrdenes}
+            disabled={importing || refreshingStatuses}
+            className="flex items-center justify-center gap-2 rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-blue-700 disabled:opacity-50"
+          >
+            <ArrowPathIcon
+              className={`h-5 w-5 ${importing ? "animate-spin" : ""}`}
+            />
+            {importing ? "Importando..." : "Refrescar"}
+          </button>
+          <button
+            onClick={refreshOrderStatuses}
+            disabled={importing || refreshingStatuses || orders.length === 0}
+            title="Revisa únicamente las órdenes visibles en esta lista"
+            className="flex items-center justify-center gap-2 rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-indigo-700 disabled:opacity-50"
+          >
+            <ArrowPathIcon
+              className={`h-5 w-5 ${refreshingStatuses ? "animate-spin" : ""}`}
+            />
+            {refreshingStatuses ? "Actualizando..." : "Refrescar estados"}
+          </button>
+        </div>
       </div>
 
       {/* Tabla de órdenes */}
@@ -89,6 +172,7 @@ const OrderList = () => {
               <th className="px-2 py-1 text-left print:py-0.5">MARKETPLACE</th>
               <th className="px-2 py-1 text-left print:py-0.5">CÓDIGO</th>
               <th className="px-2 py-1 text-left print:py-0.5">ENTREGA</th>
+              <th className="px-2 py-1 text-left print:py-0.5">ESTADO</th>
               <th className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5">C</th>
               <th className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5">P</th>
               <th className="px-1 py-1 text-center hidden sm:table-cell print:py-0.5">T</th>
@@ -141,6 +225,13 @@ ${isRelleno ? "bg-yellow-300 print:bg-yellow-100" : ""}
                           day: "numeric"
                         })}
                       </td>
+
+                      <td
+                        className="px-2 py-1 print:py-0.5"
+                        rowSpan={orderHeader.details.length}
+                      >
+                        <OrderStatusBadge status={orderHeader.status} compact />
+                      </td>
                     </>
                   )}
 
@@ -183,6 +274,11 @@ ${isRelleno ? "bg-yellow-300 print:bg-yellow-100" : ""}
           </table>
         </div>
       )}
+
+      <StatusRefreshToast
+        feedback={statusToast}
+        onClose={() => setStatusToast(null)}
+      />
     </div>
   );
 };

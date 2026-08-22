@@ -11,6 +11,15 @@ export const MARKETPLACE_ORDER_ENDPOINTS = [
 
 export type MarketplaceSyncMode = 'orders' | 'returns';
 
+export function getMarketplaceSyncDays(
+  searchParams: Pick<URLSearchParams, 'get'>,
+  fallback: number,
+): number {
+  const parsed = Number(searchParams.get('days'));
+  if (!Number.isInteger(parsed) || parsed < 1) return fallback;
+  return Math.min(parsed, 60);
+}
+
 export function getMarketplaceSyncMode(
   searchParams: Pick<URLSearchParams, 'get'>,
 ): MarketplaceSyncMode {
@@ -21,9 +30,11 @@ export function buildMarketplaceSyncUrl(
   origin: string,
   path: string,
   mode: MarketplaceSyncMode,
+  days?: number,
 ): string {
   const url = new URL(path, origin);
   url.searchParams.set('mode', mode);
+  if (days !== undefined) url.searchParams.set('days', String(days));
   return url.toString();
 }
 
@@ -48,13 +59,14 @@ export function marketplacePayloadHasFailures(payload: unknown): boolean {
 export async function runMarketplaceSync(
   origin: string,
   mode: MarketplaceSyncMode,
+  days?: number,
 ) {
   const internalSession = await createInternalSessionToken();
   const results = await Promise.all(
     MARKETPLACE_ORDER_ENDPOINTS.map(async (path) => {
       try {
         const response = await fetch(
-          buildMarketplaceSyncUrl(origin, path, mode),
+          buildMarketplaceSyncUrl(origin, path, mode, days),
           {
             cache: 'no-store',
             headers: { 'x-internal-session': internalSession },
@@ -79,6 +91,7 @@ export async function runMarketplaceSync(
 
   return {
     mode,
+    days: days ?? null,
     success: results.every((result) => result.ok),
     results,
   };

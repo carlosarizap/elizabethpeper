@@ -2,13 +2,14 @@ import pool from '@/app/lib/db';
 import axios from 'axios';
 import { getFalabellaSignature } from './signature-helper';
 import { fetchOrderItems } from '@/app/lib/falabella/fetch-order-items'; // <-- ahora lo modularizamos
+import { getFalabellaInvoiceType } from '../invoices/invoice-upload-utils.ts';
 
 export async function uploadInvoicesToFalabella() {
     const client = await pool.connect();
 
     try {
         const { rows: orders } = await client.query(`
-      SELECT id, order_id, invoice_pdf, delivery_date
+      SELECT id, order_id, invoice_pdf, delivery_date, document_type
       FROM order_header
       WHERE 
         marketplace = 'falabella'
@@ -18,7 +19,7 @@ export async function uploadInvoicesToFalabella() {
     `);
 
         if (orders.length === 0) {
-            console.log('✅ No hay boletas pendientes de subir a Falabella.');
+            console.log('✅ No hay documentos pendientes de subir a Falabella.');
             return;
         }
 
@@ -71,7 +72,7 @@ export async function uploadInvoicesToFalabella() {
                     orderItemIds: orderItemIds,
                     invoiceNumber: order.order_id,
                     invoiceDate: invoiceDateStr,
-                    invoiceType: 'BOLETA',
+                    invoiceType: getFalabellaInvoiceType(order.document_type),
                     operatorCode: 'FACL',
                     invoiceDocumentFormat: 'pdf',
                     invoiceDocument: order.invoice_pdf.toString('base64'),
@@ -84,7 +85,10 @@ export async function uploadInvoicesToFalabella() {
                     { headers }
                 );
 
-                console.log(`📤 Boleta subida correctamente para orden: ${order.order_id}`, response.data);
+                console.log(
+                    `📤 ${body.invoiceType} subida correctamente para orden: ${order.order_id}`,
+                    response.data
+                );
 
                 await client.query(`
           UPDATE order_header 
@@ -96,21 +100,21 @@ export async function uploadInvoicesToFalabella() {
                 const falabellaError = uploadError.response?.data;
 
                 if (falabellaError) {
-                    console.error(`❌ Error al subir boleta para orden: ${order.order_id}`);
+                    console.error(`❌ Error al subir documento para orden: ${order.order_id}`);
                     console.error('🔴 Mensaje principal:', falabellaError?.ErrorResponse?.Head?.ErrorMessage);
                     console.error('🔴 Código de error:', falabellaError?.ErrorResponse?.Head?.ErrorCode);
                     console.error('🔴 Detalle de errores:');
                     console.dir(falabellaError?.ErrorResponse?.Body?.errors, { depth: null });
                 } else {
-                    console.error(`❌ Error desconocido al subir boleta para orden: ${order.order_id}`, uploadError.message);
+                    console.error(`❌ Error desconocido al subir documento para orden: ${order.order_id}`, uploadError.message);
                 }
             }
         }
 
-        console.log('🏁 Proceso de carga de boletas a Falabella finalizado.');
+        console.log('🏁 Proceso de carga de documentos a Falabella finalizado.');
 
     } catch (error) {
-        console.error('Error subiendo boletas a Falabella:', error);
+        console.error('Error subiendo documentos a Falabella:', error);
     } finally {
         client.release();
     }

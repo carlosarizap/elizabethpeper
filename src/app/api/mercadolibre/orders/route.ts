@@ -24,7 +24,10 @@ import {
   ORDER_STATUSES,
   type StandardOrderStatus,
 } from '@/app/lib/orders/order-status';
-import { getMarketplaceSyncMode } from '@/app/lib/orders/marketplace-sync';
+import {
+  getMarketplaceSyncDays,
+  getMarketplaceSyncMode,
+} from '@/app/lib/orders/marketplace-sync';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -407,9 +410,9 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const recheckDays = positiveIntegerEnv(
-      'MERCADO_LIBRE_RETURN_RECHECK_DAYS',
-      60,
+    const recheckDays = getMarketplaceSyncDays(
+      request.nextUrl.searchParams,
+      positiveIntegerEnv('MERCADO_LIBRE_RETURN_RECHECK_DAYS', 60),
     );
     let updatedOrderIds: string[];
     let existingOrderIds: string[];

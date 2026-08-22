@@ -1,10 +1,10 @@
-import { runMarketplaceSync } from '@/app/lib/orders/marketplace-sync';
+import { refreshMarketplaceOrders } from '@/app/lib/orders/status-refresh';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
 export async function GET(request: NextRequest) {
-  const result = await runMarketplaceSync(request.nextUrl.origin, 'orders');
+  const result = await refreshMarketplaceOrders(request.nextUrl.origin);
   return NextResponse.json(result, { status: result.success ? 200 : 207 });
 }

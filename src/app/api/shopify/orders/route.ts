@@ -11,7 +11,10 @@ import {
   getShopifyAccessToken,
   getShopifyGrantedScopes,
 } from '@/app/lib/shopify/token-manager';
-import { getMarketplaceSyncMode } from '@/app/lib/orders/marketplace-sync';
+import {
+  getMarketplaceSyncDays,
+  getMarketplaceSyncMode,
+} from '@/app/lib/orders/marketplace-sync';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -225,9 +228,9 @@ export async function GET(request: NextRequest) {
     const requestedOrderId = request.nextUrl.searchParams.get('orderId')?.trim() || null;
     const mode = getMarketplaceSyncMode(request.nextUrl.searchParams);
     const syncDays = positiveInteger(process.env.SHOPIFY_SYNC_DAYS, 4);
-    const returnRecheckDays = positiveInteger(
-      process.env.SHOPIFY_RETURN_RECHECK_DAYS,
-      60,
+    const returnRecheckDays = getMarketplaceSyncDays(
+      request.nextUrl.searchParams,
+      positiveInteger(process.env.SHOPIFY_RETURN_RECHECK_DAYS, 60),
     );
     const accessToken = await getShopifyAccessToken();
     const scopes = await getShopifyGrantedScopes(accessToken);

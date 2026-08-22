@@ -2,6 +2,7 @@ import pool from '@/app/lib/db';
 import axios from 'axios';
 import FormData from 'form-data';
 import { getParisUploadAccessToken } from './token-manager';
+import { isParisRepeatedInvoiceError } from '../invoices/invoice-upload-utils.ts';
 
 export async function uploadInvoicesToParis() {
   const client = await pool.connect();
@@ -18,7 +19,7 @@ export async function uploadInvoicesToParis() {
     `);
 
     if (orders.length === 0) {
-      console.log('✅ No hay boletas pendientes de subir a París.');
+      console.log('✅ No hay documentos pendientes de subir a París.');
       return;
     }
 
@@ -39,7 +40,7 @@ export async function uploadInvoicesToParis() {
         form.append('invoice_type', order.document_type);
         form.append('order_number', order.order_id);
         form.append('file', Buffer.from(order.invoice_pdf), {
-          filename: `boleta_${order.id}.pdf`,
+          filename: `${order.document_type}_${order.id}.pdf`,
           contentType: 'application/pdf',
         });
 
@@ -54,7 +55,10 @@ export async function uploadInvoicesToParis() {
           }
         );
 
-        console.log(`📤 Boleta subida correctamente para orden: ${order.order_id}`, response.data);
+        console.log(
+          `📤 ${String(order.document_type).toUpperCase()} subida correctamente para orden: ${order.order_id}`,
+          response.data
+        );
 
         await client.query(`
           UPDATE order_header
@@ -64,7 +68,22 @@ export async function uploadInvoicesToParis() {
 
       } catch (uploadError: any) {
         const errorData = uploadError.response?.data;
-        console.error(`❌ Error al subir boleta para orden: ${order.order_id}`);
+
+        if (isParisRepeatedInvoiceError(errorData)) {
+          await client.query(`
+            UPDATE order_header
+            SET invoice_uploaded = true,
+                updated_at = NOW()
+            WHERE id = $1
+          `, [order.id]);
+          console.log(
+            `✅ Documento de la orden ${order.order_id} ya estaba cargado en París; ` +
+            'se marcó como subido localmente.'
+          );
+          continue;
+        }
+
+        console.error(`❌ Error al subir documento para orden: ${order.order_id}`);
         if (errorData) {
           console.dir(errorData, { depth: null });
         } else {
@@ -73,9 +92,9 @@ export async function uploadInvoicesToParis() {
       }
     }
 
-    console.log('🏁 Proceso de carga de boletas a París finalizado.');
+    console.log('🏁 Proceso de carga de documentos a París finalizado.');
   } catch (error) {
-    console.error('Error general subiendo boletas a París:', error);
+    console.error('Error general subiendo documentos a París:', error);
   } finally {
     client.release();
   }

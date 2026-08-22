@@ -13,10 +13,21 @@ export async function GET(req: NextRequest) {
     const startDate = url.searchParams.get("startDate") || '';
     const endDate = url.searchParams.get("endDate") || '';
     const hasInvoice = url.searchParams.get("hasInvoice") || '';
+    const status = url.searchParams.get("status") || '';
 
-    const { orders } = await fetchAllOrders(page, search, marketplace, documentType, deliveryDate, startDate, endDate, hasInvoice);
+    const { orders, filterOptions } = await fetchAllOrders(
+      page,
+      search,
+      marketplace,
+      documentType,
+      deliveryDate,
+      startDate,
+      endDate,
+      hasInvoice,
+      status,
+    );
 
-    return NextResponse.json({ orders });
+    return NextResponse.json({ orders, filterOptions });
   } catch (error) {
     console.error(error);
     return NextResponse.json({ error: "Error al cargar órdenes." }, { status: 500 });

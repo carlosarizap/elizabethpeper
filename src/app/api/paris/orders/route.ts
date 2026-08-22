@@ -15,7 +15,10 @@ import {
   normalizeMarketplaceOrderItemStatus,
 } from '@/app/lib/orders/order-item-status';
 import { resolveParisOrderStatus } from '@/app/lib/orders/marketplace-status-mappers';
-import { getMarketplaceSyncMode } from '@/app/lib/orders/marketplace-sync';
+import {
+  getMarketplaceSyncDays,
+  getMarketplaceSyncMode,
+} from '@/app/lib/orders/marketplace-sync';
 import dayjs from 'dayjs';
 import timezone from 'dayjs/plugin/timezone';
 import utc from 'dayjs/plugin/utc';
@@ -135,7 +138,10 @@ export async function GET(request: NextRequest) {
   const debug = request.nextUrl.searchParams.get('debug') === 'true';
   const mode = getMarketplaceSyncMode(request.nextUrl.searchParams);
   const syncDays = readDays(process.env.PARIS_SYNC_DAYS, 4);
-  const returnRecheckDays = readDays(process.env.PARIS_RETURN_RECHECK_DAYS, 60);
+  const returnRecheckDays = getMarketplaceSyncDays(
+    request.nextUrl.searchParams,
+    readDays(process.env.PARIS_RETURN_RECHECK_DAYS, 60),
+  );
 
   try {
     let recentOrders: ParisOrderPayload[];

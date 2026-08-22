@@ -3,7 +3,10 @@ import { MARKETPLACES } from '@/app/lib/constants/marketplaces';
 import { getFalabellaInvoiceData } from '@/app/lib/falabella/invoice-data';
 import { normalizeMarketplaceOrderItemStatus } from '@/app/lib/orders/order-item-status';
 import { normalizeOrderStatus } from '@/app/lib/orders/marketplace-status-mappers';
-import { getMarketplaceSyncMode } from '@/app/lib/orders/marketplace-sync';
+import {
+  getMarketplaceSyncDays,
+  getMarketplaceSyncMode,
+} from '@/app/lib/orders/marketplace-sync';
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 
@@ -104,30 +107,45 @@ async function fetchOrderItems(
 export async function GET(request: NextRequest) {
   const userId = process.env.FALABELLA_USER_ID!;
   const apiKey = process.env.FALABELLA_API_KEY!;
+  const requestedOrderId = request.nextUrl.searchParams.get('orderId')?.trim();
+  const sellerCenterOrderId = requestedOrderId?.split('-').at(-1);
   const mode = getMarketplaceSyncMode(request.nextUrl.searchParams);
   const syncDays = readDays(process.env.FALABELLA_SYNC_DAYS, 4);
   const returnRecheckDays = readDays(
     process.env.FALABELLA_RETURN_RECHECK_DAYS,
     60,
   );
-  const days = mode === 'returns' ? returnRecheckDays : syncDays;
+  const days = mode === 'returns'
+    ? getMarketplaceSyncDays(request.nextUrl.searchParams, returnRecheckDays)
+    : syncDays;
 
   if (!userId || !apiKey) {
     return NextResponse.json({ error: 'Credenciales faltantes' }, { status: 400 });
   }
 
+  if (requestedOrderId && !/^\d+$/.test(sellerCenterOrderId ?? '')) {
+    return NextResponse.json(
+      { error: 'La orden Falabella no contiene un OrderId válido.' },
+      { status: 400 },
+    );
+  }
+
   try {
     const timestamp = getTimestamp();
-    const baseParams = {
-      Action: 'GetOrders',
+    const baseParams: Record<string, string> = {
+      Action: requestedOrderId ? 'GetOrder' : 'GetOrders',
       Format: 'JSON',
       Timestamp: timestamp,
       UserID: userId,
       Version: '1.0',
-      CreatedAfter: new Date(
-        Date.now() - 1000 * 60 * 60 * 24 * days,
-      ).toISOString(),
     };
+    if (requestedOrderId) {
+      baseParams.OrderId = sellerCenterOrderId!;
+    } else {
+      baseParams.CreatedAfter = new Date(
+        Date.now() - 1000 * 60 * 60 * 24 * days,
+      ).toISOString();
+    }
     const signature = calculateSignature(baseParams, apiKey);
     const queryParams = new URLSearchParams({
       ...baseParams,
@@ -137,7 +155,10 @@ export async function GET(request: NextRequest) {
       `https://sellercenter-api.falabella.com/?${queryParams}`,
     );
     const data = await response.json();
-    const orders = data?.SuccessResponse?.Body?.Orders?.Order || [];
+    const orders =
+      data?.SuccessResponse?.Body?.Orders?.Order ??
+      data?.SuccessResponse?.Body?.Order ??
+      [];
     const ordersArray = Array.isArray(orders) ? orders : [orders];
     const synchronizedOrders = [];
 
@@ -217,6 +238,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       mode,
+      requestedOrderId: requestedOrderId ?? null,
       days,
       synchronized: synchronizedOrders.length,
       inserted: synchronizedOrders,

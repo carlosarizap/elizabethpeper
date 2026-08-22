@@ -3,7 +3,6 @@ import { unstable_noStore as noStore } from 'next/cache';
 import { OrderHeader } from '../definitions/order_header';
 
 const ITEMS_PER_PAGE = 150;
-const ORDERS_VIEW_LIMIT = 300;
 const DASHBOARD_MONTH_FILTER = `
   (oh.created_at AT TIME ZONE 'America/Santiago')::date >= make_date($1, $2, 1)
   AND (oh.created_at AT TIME ZONE 'America/Santiago')::date <
@@ -205,19 +204,35 @@ export async function fetchOrderById(id: string) {
 }
 
 export async function fetchAllOrders(
-  page: number = 1,
+  _page: number = 1,
   query: string = '',
   marketplace: string = '',
   documentType: string = '',
   deliveryDate: string = '',
   startDate: string = '',
   endDate: string = '',
-  hasInvoice: string = ''
+  hasInvoice: string = '',
+  status: string = ''
 ) {
   noStore();
   try {
-    const offset = (page - 1) * ORDERS_VIEW_LIMIT;
     const client = await pool.connect();
+
+    const filterOptionsResult = await client.query(`
+      SELECT
+        ARRAY_AGG(DISTINCT marketplace ORDER BY marketplace)
+          FILTER (WHERE marketplace IS NOT NULL AND marketplace <> '') AS marketplaces,
+        ARRAY(
+          SELECT candidate
+          FROM UNNEST(ARRAY['pendiente', 'enviado', 'recibido', 'cancelado', 'devuelto']) AS candidate
+          WHERE EXISTS (
+            SELECT 1
+            FROM order_header existing
+            WHERE existing.status = candidate
+          )
+        ) AS statuses
+      FROM order_header
+    `);
 
     let filters: string[] = [];
     let params: any[] = [];
@@ -239,22 +254,21 @@ export async function fetchAllOrders(
       params.push(deliveryDate);
     }
     if (startDate) {
-      filters.push(`oh.created_at::date >= $${params.length + 1}`);
+      filters.push(`(oh.created_at AT TIME ZONE 'America/Santiago')::date >= $${params.length + 1}`);
       params.push(startDate);
     }
     if (endDate) {
-      filters.push(`oh.created_at::date <= $${params.length + 1}`);
+      filters.push(`(oh.created_at AT TIME ZONE 'America/Santiago')::date <= $${params.length + 1}`);
       params.push(endDate);
     }
     if (hasInvoice) {
       filters.push(`oh.has_invoice = $${params.length + 1}`);
       params.push(hasInvoice === "true");
     }
-
-    // Agrega LIMIT y OFFSET al final
-    const limitParam = `$${params.length + 1}`;
-    const offsetParam = `$${params.length + 2}`;
-    params.push(ORDERS_VIEW_LIMIT, offset);
+    if (status) {
+      filters.push(`oh.status = $${params.length + 1}`);
+      params.push(status);
+    }
 
     const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
 
@@ -266,7 +280,6 @@ export async function fetchAllOrders(
         ${whereClause}
         GROUP BY oh.id, oh.created_at
         ORDER BY oh.created_at DESC
-        LIMIT ${limitParam} OFFSET ${offsetParam}
       )
       SELECT 
         oh.id AS id,
@@ -275,11 +288,16 @@ export async function fetchAllOrders(
         oh.shipping_amount,
         oh.document_type,
         oh.has_invoice,
-        oh.invoice_pdf,
+        (oh.invoice_pdf IS NOT NULL) AS has_invoice_pdf,
         oh.has_credit_note,
+        (oh.credit_note_pdf IS NOT NULL) AS has_credit_note_pdf,
         oh.sii_folio,
         oh.sii_issued_at,
         oh.status,
+        oh.return_status,
+        oh.return_updated_at,
+        oh.company_rut,
+        oh.billing_city,
         oh.marketplace,
         oh.delivery_date,
         oh.created_at AS header_created_at,
@@ -313,8 +331,9 @@ export async function fetchAllOrders(
           shipping_amount: row.shipping_amount || 0,
           document_type: row.document_type || 'boleta',
           has_invoice: row.has_invoice || false,
-          invoice_pdf: row.invoice_pdf || null,
+          invoice_pdf: row.has_invoice_pdf ? 'available' : null,
           has_credit_note: row.has_credit_note || false,
+          credit_note_pdf: row.has_credit_note_pdf ? 'available' : null,
           sii_folio: row.sii_folio === null ? null : Number(row.sii_folio),
           sii_issued_at: row.sii_issued_at || null,
           marketplace: row.marketplace,
@@ -351,6 +370,10 @@ export async function fetchAllOrders(
 
     return {
       orders: Array.from(headersMap.values()),
+      filterOptions: {
+        marketplaces: filterOptionsResult.rows[0]?.marketplaces ?? [],
+        statuses: filterOptionsResult.rows[0]?.statuses ?? [],
+      },
     };
 
   } catch (error) {
@@ -376,6 +399,31 @@ export async function getOrderInvoiceById(orderId: string): Promise<Buffer | nul
   } catch (error) {
     console.error('Error consultando invoice PDF:', error);
     throw new Error('Failed to fetch invoice.');
+  } finally {
+    client.release();
+  }
+}
+
+export async function getOrderCreditNoteById(orderId: string): Promise<Buffer | null> {
+  const client = await pool.connect();
+
+  try {
+    const result = await client.query(
+      `SELECT credit_note_pdf
+       FROM order_header
+       WHERE id = $1
+         AND has_credit_note = true`,
+      [orderId],
+    );
+
+    if (result.rowCount === 0 || !result.rows[0].credit_note_pdf) {
+      return null;
+    }
+
+    return result.rows[0].credit_note_pdf;
+  } catch (error) {
+    console.error('Error consultando PDF de nota de crédito:', error);
+    throw new Error('Failed to fetch credit note.');
   } finally {
     client.release();
   }

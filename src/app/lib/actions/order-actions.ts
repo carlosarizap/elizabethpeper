@@ -436,6 +436,16 @@ export interface MercadoLibreOrderItemInput extends FalabellaOrderItemInput {
   marketplaceOrderId: string;
 }
 
+export interface MercadoLibreShipmentInput {
+  externalShipmentId: string;
+  externalOrderId?: string | null;
+  status?: string | null;
+  substatus?: string | null;
+  shippingMode?: string | null;
+  logisticType?: string | null;
+  trackingNumber?: string | null;
+}
+
 export interface MercadoLibreOrderInput {
   orderId: string;
   shippingAmount: number;
@@ -444,6 +454,7 @@ export interface MercadoLibreOrderInput {
   deliveryDate?: string | null;
   companyRut?: string | null;
   billingCity?: string | null;
+  shipments?: readonly MercadoLibreShipmentInput[];
   items: readonly MercadoLibreOrderItemInput[];
 }
 
@@ -657,6 +668,38 @@ export async function upsertMercadoLibreOrder(order: MercadoLibreOrderInput) {
            AND marketplace_item_id IS NULL
            AND product_title = ANY($2::text[])`,
         [orderHeaderId, synchronizedProductTitles],
+      );
+    }
+
+    for (const shipment of order.shipments ?? []) {
+      await client.query(
+        `INSERT INTO marketplace_shipment (
+           id_order_header, marketplace, external_shipment_id,
+           external_order_id, status, substatus, shipping_mode,
+           logistic_type, tracking_number
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (marketplace, external_shipment_id)
+         DO UPDATE SET
+           id_order_header = EXCLUDED.id_order_header,
+           external_order_id = COALESCE(EXCLUDED.external_order_id, marketplace_shipment.external_order_id),
+           status = EXCLUDED.status,
+           substatus = EXCLUDED.substatus,
+           shipping_mode = EXCLUDED.shipping_mode,
+           logistic_type = EXCLUDED.logistic_type,
+           tracking_number = COALESCE(EXCLUDED.tracking_number, marketplace_shipment.tracking_number),
+           updated_at = NOW()`,
+        [
+          orderHeaderId,
+          MARKETPLACES.MERCADO_LIBRE,
+          shipment.externalShipmentId,
+          shipment.externalOrderId ?? null,
+          shipment.status ?? null,
+          shipment.substatus ?? null,
+          shipment.shippingMode ?? null,
+          shipment.logisticType ?? null,
+          shipment.trackingNumber ?? null,
+        ],
       );
     }
 

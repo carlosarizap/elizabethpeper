@@ -1,10 +1,18 @@
 import crypto from 'crypto';
 
-export function getFalabellaSignature(params: Record<string, string>, apiKey: string) {
+export function calculateFalabellaSignature(
+  params: Record<string, string>,
+  apiKey: string,
+) {
   const sortedKeys = Object.keys(params).sort();
-  const baseString = sortedKeys.map(key => `${encodeURIComponent(key)}=${encodeURIComponent(params[key])}`).join("&");
+  const baseString = sortedKeys
+    .map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(params[key])}`)
+    .join('&');
+  return crypto.createHmac('sha256', apiKey).update(baseString).digest('hex');
+}
 
-  const signature = crypto.createHmac('sha256', apiKey).update(baseString).digest('hex');
+export function getFalabellaSignature(params: Record<string, string>, apiKey: string) {
+  const signature = calculateFalabellaSignature(params, apiKey);
 
   return {
     accept: 'application/json',

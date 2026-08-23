@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "db:migrate": "node --env-file=.env scripts/run-migration.cjs",
     "test": "node --test --experimental-strip-types tests/*.test.ts"
   },
   "dependencies": {
@@ -17,6 +18,7 @@
     "date-fns": "^4.1.0",
     "dayjs": "^1.11.13",
     "next": "15.5.7",
+    "pdf-lib": "^1.17.1",
     "pg": "^8.14.1",
     "react": "19.1.0",
     "react-date-range": "^2.0.1",

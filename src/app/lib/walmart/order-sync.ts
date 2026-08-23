@@ -34,13 +34,20 @@ export interface WalmartCharge {
 export interface WalmartOrderLineStatus {
   status?: string | null;
   statusQuantity?: { amount?: string | number | null } | null;
+  trackingInfo?: {
+    trackingNumber?: string | number | null;
+    [key: string]: unknown;
+  } | null;
 }
 
 export interface WalmartOrderLine {
   lineNumber?: string | number | null;
   item?: { productName?: string | null; sku?: string | null } | null;
   charges?: { charge?: WalmartCharge | WalmartCharge[] | null } | null;
-  orderLineQuantity?: { amount?: string | number | null } | null;
+  orderLineQuantity?: {
+    amount?: string | number | null;
+    unitOfMeasurement?: string | null;
+  } | null;
   orderLineStatuses?: {
     orderLineStatus?: WalmartOrderLineStatus | WalmartOrderLineStatus[] | null;
   } | null;

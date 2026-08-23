@@ -8,6 +8,7 @@ import {
   ClipboardDocumentListIcon,
   ArrowRightStartOnRectangleIcon,
   ListBulletIcon,
+  TruckIcon,
 } from '@heroicons/react/24/solid';
 import clsx from 'clsx';
 
@@ -27,6 +28,11 @@ const navItems = [
     href: '/',
     icon: ListBulletIcon,
   },
+  {
+    label: 'Despachos',
+    href: '/dispatches',
+    icon: TruckIcon,
+  },
 ];
 
 export default function Navbar() {
@@ -45,7 +51,9 @@ export default function Navbar() {
         {/* Ítems de navegación */}
         <ul className="flex gap-2 sm:gap-4 text-sm font-medium text-gray-700">
           {navItems.map(({ label, href, icon: Icon }) => {
-            const isActive = pathname === href;
+            const isActive = href === '/'
+              ? pathname === href
+              : pathname === href || pathname.startsWith(`${href}/`);
             return (
               <li key={href}>
                 <Link

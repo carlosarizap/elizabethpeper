@@ -59,7 +59,16 @@ interface MercadoLibrePack {
 }
 
 interface MercadoLibreShipment {
+  id?: unknown;
   status?: unknown;
+  substatus?: unknown;
+  mode?: unknown;
+  logistic_type?: unknown;
+  logistic?: {
+    mode?: unknown;
+    type?: unknown;
+  } | null;
+  tracking_number?: unknown;
   shipping_option?: {
     cost?: unknown;
     estimated_delivery_time?: { date?: unknown } | null;
@@ -518,7 +527,10 @@ export async function GET(request: NextRequest) {
     for (const [headerOrderId, packOrders] of groupedOrders) {
       const items = [];
       const orderStatuses: StandardOrderStatus[] = [];
-      const uniqueShipments = new Map<string, MercadoLibreShipment>();
+      const uniqueShipments = new Map<string, {
+        shipment: MercadoLibreShipment;
+        externalOrderId: string;
+      }>();
       const deliveryDates: string[] = [];
       const fallbackShippingAmounts: number[] = [];
       const invoicePayloads: unknown[] = [];
@@ -530,7 +542,9 @@ export async function GET(request: NextRequest) {
 
         const shipmentId = stringValue(order.shipping?.id);
         const shipment = shipmentId ? await getShipment(shipmentId) : null;
-        if (shipmentId && shipment) uniqueShipments.set(shipmentId, shipment);
+        if (shipmentId && shipment) {
+          uniqueShipments.set(shipmentId, { shipment, externalOrderId: marketplaceOrderId });
+        }
 
         const shipmentStatus = stringValue(shipment?.status);
         const rawForwardStatus = shipmentStatus ?? stringValue(order.status);
@@ -590,7 +604,7 @@ export async function GET(request: NextRequest) {
       }
 
       const shipmentAmounts = [...uniqueShipments.values()]
-        .map((shipment) => numericValue(shipment.shipping_option?.cost))
+        .map(({ shipment }) => numericValue(shipment.shipping_option?.cost))
         .filter((amount) => amount > 0);
       const shippingAmount = shipmentAmounts.length > 0
         ? shipmentAmounts.reduce((sum, amount) => sum + amount, 0)
@@ -612,6 +626,17 @@ export async function GET(request: NextRequest) {
         deliveryDate: deliveryDates.sort()[0] ?? null,
         companyRut: invoiceData.companyRut,
         billingCity: invoiceData.billingCity,
+        shipments: Array.from(uniqueShipments, ([externalShipmentId, entry]) => ({
+          externalShipmentId,
+          externalOrderId: entry.externalOrderId,
+          status: stringValue(entry.shipment.status),
+          substatus: stringValue(entry.shipment.substatus),
+          shippingMode: stringValue(entry.shipment.mode)
+            ?? stringValue(entry.shipment.logistic?.mode),
+          logisticType: stringValue(entry.shipment.logistic_type)
+            ?? stringValue(entry.shipment.logistic?.type),
+          trackingNumber: stringValue(entry.shipment.tracking_number),
+        })),
         items,
       });
       synchronizedOrders.push({

@@ -1,4 +1,5 @@
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { drawProductSummaryBlock } from '../dispatches/product-summary-pdf.ts';
 import { composeLetterLabelPdf } from '../mercadolibre/shipping-label-utils.ts';
 
 const PARIS_API = 'https://api-developers.ecomm.cencosud.com';
@@ -9,6 +10,8 @@ const GRID_MARGIN = 18;
 const GRID_GAP = 12;
 const GRID_COLUMNS = 2;
 const GRID_ROWS = 2;
+const SUMMARY_HEIGHT = 78;
+const SUMMARY_GAP = 4;
 const PARIS_CROP = {
   left: 165,
   bottom: 300,
@@ -25,6 +28,14 @@ interface ParisLabelDocument {
   url?: unknown;
   labels?: unknown;
 }
+
+export interface ParisLabelPrintInput {
+  document: Uint8Array;
+  orderId: string;
+  productSummary: string | null;
+}
+
+type ParisLabelSource = Uint8Array | ParisLabelPrintInput;
 
 function cleanString(value: unknown): string | null {
   if (value === null || value === undefined) return null;
@@ -113,17 +124,15 @@ export async function downloadParisShippingLabelPdfs(
 }
 
 export async function composeParisLabelsLetterGridPdf(
-  sourceDocuments: readonly Uint8Array[],
+  sourceDocuments: readonly ParisLabelSource[],
 ): Promise<Uint8Array> {
   if (sourceDocuments.length === 0) {
     throw new Error('No hay etiquetas París para componer.');
   }
 
-  // París entrega una página completa con una etiqueta pequeña al centro.
-  // Primero normalizamos cada página a carta y luego recortamos solo el área útil.
-  const normalizedBytes = await composeLetterLabelPdf(sourceDocuments);
-  const normalized = await PDFDocument.load(normalizedBytes);
   const output = await PDFDocument.create();
+  const regularFont = await output.embedFont(StandardFonts.Helvetica);
+  const boldFont = await output.embedFont(StandardFonts.HelveticaBold);
   const cropWidth = PARIS_CROP.right - PARIS_CROP.left;
   const cropHeight = PARIS_CROP.top - PARIS_CROP.bottom;
   const cellWidth = (
@@ -133,34 +142,57 @@ export async function composeParisLabelsLetterGridPdf(
     LETTER_HEIGHT - GRID_MARGIN * 2 - GRID_GAP * (GRID_ROWS - 1)
   ) / GRID_ROWS;
 
-  let targetPage = output.addPage([LETTER_WIDTH, LETTER_HEIGHT]);
-  for (let pageIndex = 0; pageIndex < normalized.getPageCount(); pageIndex += 1) {
-    const slot = pageIndex % (GRID_COLUMNS * GRID_ROWS);
-    if (pageIndex > 0 && slot === 0) {
-      targetPage = output.addPage([LETTER_WIDTH, LETTER_HEIGHT]);
+  let labelIndex = 0;
+  for (const sourceDocument of sourceDocuments) {
+    const source = sourceDocument instanceof Uint8Array
+      ? { document: sourceDocument, orderId: 'SIN ORDEN', productSummary: null }
+      : sourceDocument;
+    // París entrega una página completa con una etiqueta pequeña al centro.
+    // Normalizamos cada documento por separado para conservar su resumen asociado.
+    const normalizedBytes = await composeLetterLabelPdf([source.document]);
+    const normalized = await PDFDocument.load(normalizedBytes);
+
+    for (const normalizedPage of normalized.getPages()) {
+      const slot = labelIndex % (GRID_COLUMNS * GRID_ROWS);
+      const targetPage = slot === 0
+        ? output.addPage([LETTER_WIDTH, LETTER_HEIGHT])
+        : output.getPage(output.getPageCount() - 1);
+      const column = slot % GRID_COLUMNS;
+      const rowFromTop = Math.floor(slot / GRID_COLUMNS);
+      const cellX = GRID_MARGIN + column * (cellWidth + GRID_GAP);
+      const cellY = LETTER_HEIGHT
+        - GRID_MARGIN
+        - (rowFromTop + 1) * cellHeight
+        - rowFromTop * GRID_GAP;
+      const availableLabelHeight = cellHeight - SUMMARY_HEIGHT - SUMMARY_GAP;
+      const scale = Math.min(
+        cellWidth / cropWidth,
+        availableLabelHeight / cropHeight,
+      );
+      const drawWidth = cropWidth * scale;
+      const drawHeight = cropHeight * scale;
+      const embeddedPage = await output.embedPage(normalizedPage, PARIS_CROP);
+
+      targetPage.drawPage(embeddedPage, {
+        x: cellX + (cellWidth - drawWidth) / 2,
+        y: cellY + (availableLabelHeight - drawHeight) / 2,
+        width: drawWidth,
+        height: drawHeight,
+      });
+      drawProductSummaryBlock(targetPage, {
+        x: cellX,
+        y: cellY + availableLabelHeight + SUMMARY_GAP,
+        width: cellWidth,
+        height: SUMMARY_HEIGHT,
+        orderId: source.orderId,
+        productSummary: source.productSummary,
+        regularFont,
+        boldFont,
+        bodyFontSize: 6,
+        maxLines: 9,
+      });
+      labelIndex += 1;
     }
-
-    const column = slot % GRID_COLUMNS;
-    const rowFromTop = Math.floor(slot / GRID_COLUMNS);
-    const embeddedPage = await output.embedPage(
-      normalized.getPage(pageIndex),
-      PARIS_CROP,
-    );
-    const x = GRID_MARGIN
-      + column * (cellWidth + GRID_GAP)
-      + (cellWidth - cropWidth) / 2;
-    const y = LETTER_HEIGHT
-      - GRID_MARGIN
-      - (rowFromTop + 1) * cellHeight
-      - rowFromTop * GRID_GAP
-      + (cellHeight - cropHeight) / 2;
-
-    targetPage.drawPage(embeddedPage, {
-      x,
-      y,
-      width: cropWidth,
-      height: cropHeight,
-    });
   }
 
   return output.save();

@@ -517,7 +517,7 @@ export default function DispatchCenter() {
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-3 py-2 text-xs">
-            <p className="max-w-5xl text-slate-500">Mercado Libre imprime en carta horizontal; Falabella confirma y agrupa hasta 4 etiquetas por hoja; Walmart aprueba y descarga; París también agrupa hasta 4 por hoja y Ripley queda pendiente de su acceso SVC. Las no disponibles se omiten sin detener el lote.</p>
+            <p className="max-w-5xl text-slate-500">Mercado Libre imprime en carta horizontal; Falabella confirma y agrupa hasta 4 etiquetas por hoja; París y Walmart agregan el contenido del paquete a cada etiqueta; Ripley queda pendiente de su acceso SVC. Las no disponibles se omiten sin detener el lote.</p>
             <div className="flex flex-wrap gap-2.5">
               <button type="button" onClick={() => setSelection(defaultSelection(orders))} className="font-semibold text-blue-600">Seleccionar pendientes</button>
               <button type="button" onClick={() => setSelection(new Set(orders.filter((order) => order.selectable).map((order) => order.key)))} className="font-semibold text-blue-600">Seleccionar imprimibles</button>

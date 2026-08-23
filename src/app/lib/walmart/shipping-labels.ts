@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { drawProductSummaryBlock } from '../dispatches/product-summary-pdf.ts';
 import {
   parseWalmartNumber,
   toArray,
@@ -13,6 +15,11 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const TOKEN_EXPIRY_MARGIN_MS = 60_000;
 const LABEL_POLL_ATTEMPTS = 4;
 const LABEL_POLL_DELAY_MS = 750;
+const LETTER_WIDTH = 612;
+const LETTER_HEIGHT = 792;
+const LETTER_MARGIN = 12;
+const SUMMARY_HEIGHT = 92;
+const SUMMARY_GAP = 6;
 
 interface WalmartCredentials {
   clientId: string;
@@ -32,6 +39,12 @@ export interface WalmartLabelEligibility {
   eligible: boolean;
   shouldAcknowledge: boolean;
   reason: string | null;
+}
+
+export interface WalmartLabelPrintInput {
+  document: Uint8Array;
+  orderId: string;
+  productSummary: string | null;
 }
 
 let tokenCache: { token: string; expiresAt: number } | null = null;
@@ -317,6 +330,54 @@ export async function prepareWalmartShippingLabelPdfs(
     documents.push(await downloadWalmartLabel(trackingNumber));
   }
   return { documents, acknowledged };
+}
+
+export async function composeWalmartLabelsWithProductSummaryPdf(
+  inputs: readonly WalmartLabelPrintInput[],
+): Promise<Uint8Array> {
+  if (inputs.length === 0) {
+    throw new Error('No hay etiquetas Walmart para componer.');
+  }
+
+  const output = await PDFDocument.create();
+  const regularFont = await output.embedFont(StandardFonts.Helvetica);
+  const boldFont = await output.embedFont(StandardFonts.HelveticaBold);
+  const summaryY = LETTER_HEIGHT - LETTER_MARGIN - SUMMARY_HEIGHT;
+  const availableWidth = LETTER_WIDTH - LETTER_MARGIN * 2;
+  const availableHeight = summaryY - SUMMARY_GAP - LETTER_MARGIN;
+
+  for (const input of inputs) {
+    const source = await PDFDocument.load(input.document);
+    for (const sourcePage of source.getPages()) {
+      const page = output.addPage([LETTER_WIDTH, LETTER_HEIGHT]);
+      const { width, height } = sourcePage.getSize();
+      const scale = Math.min(1, availableWidth / width, availableHeight / height);
+      const drawWidth = width * scale;
+      const drawHeight = height * scale;
+      const embeddedPage = await output.embedPage(sourcePage);
+
+      page.drawPage(embeddedPage, {
+        x: LETTER_MARGIN + (availableWidth - drawWidth) / 2,
+        y: LETTER_MARGIN + (availableHeight - drawHeight) / 2,
+        width: drawWidth,
+        height: drawHeight,
+      });
+      drawProductSummaryBlock(page, {
+        x: LETTER_MARGIN,
+        y: summaryY,
+        width: availableWidth,
+        height: SUMMARY_HEIGHT,
+        orderId: input.orderId,
+        productSummary: input.productSummary,
+        regularFont,
+        boldFont,
+        bodyFontSize: 8,
+        maxLines: 8,
+      });
+    }
+  }
+
+  return output.save();
 }
 
 export function walmartLabelError(error: unknown): string {

@@ -20,14 +20,17 @@ import {
   composeParisLabelsLetterGridPdf,
   downloadParisShippingLabelPdfs,
   parisLabelError,
+  type ParisLabelPrintInput,
 } from '@/app/lib/paris/shipping-labels';
 import {
   downloadRipleyShippingLabels,
   ripleySvcError,
 } from '@/app/lib/ripley/svc-client';
 import {
+  composeWalmartLabelsWithProductSummaryPdf,
   prepareWalmartShippingLabelPdfs,
   walmartLabelError,
+  type WalmartLabelPrintInput,
 } from '@/app/lib/walmart/shipping-labels';
 
 export const dynamic = 'force-dynamic';
@@ -47,6 +50,7 @@ interface Candidate {
   shipment_id: string | null;
   external_shipment_id: string | null;
   order_item_ids: string[] | null;
+  product_summary: string | null;
 }
 
 interface MercadoLibreReady extends Candidate {
@@ -137,7 +141,8 @@ export async function POST(request: NextRequest) {
          oh.marketplace,
          ms.id AS shipment_id,
          ms.external_shipment_id,
-         items.order_item_ids
+         items.order_item_ids,
+         items.product_summary
        FROM order_header oh
        LEFT JOIN LATERAL (
          SELECT shipment.id, shipment.external_shipment_id
@@ -148,8 +153,23 @@ export async function POST(request: NextRequest) {
          LIMIT 1
        ) ms ON true
        LEFT JOIN LATERAL (
-         SELECT ARRAY_AGG(od.marketplace_item_id ORDER BY od.marketplace_item_id)
-           FILTER (WHERE od.marketplace_item_id IS NOT NULL) AS order_item_ids
+         SELECT
+           ARRAY_AGG(od.marketplace_item_id ORDER BY od.marketplace_item_id)
+             FILTER (WHERE od.marketplace_item_id IS NOT NULL) AS order_item_ids,
+           (
+             SELECT STRING_AGG(
+               grouped.total_quantity::text || ' - ' || grouped.product_title,
+               E'\n' ORDER BY grouped.product_title
+             )
+             FROM (
+               SELECT
+                 COALESCE(NULLIF(TRIM(grouped_od.product_title), ''), 'Producto sin nombre') AS product_title,
+                 SUM(grouped_od.product_quantity) AS total_quantity
+               FROM order_detail grouped_od
+               WHERE grouped_od.id_order_header = oh.id
+               GROUP BY COALESCE(NULLIF(TRIM(grouped_od.product_title), ''), 'Producto sin nombre')
+             ) grouped
+           ) AS product_summary
          FROM order_detail od
          WHERE od.id_order_header = oh.id
        ) items ON true
@@ -273,7 +293,7 @@ export async function POST(request: NextRequest) {
     const parisCandidates = candidatesResult.rows.filter(
       (candidate) => candidate.marketplace === MARKETPLACES.PARIS,
     );
-    const parisDocuments: Uint8Array[] = [];
+    const parisDocuments: ParisLabelPrintInput[] = [];
     if (parisCandidates.length > 0) {
       let parisAccessToken: string | null = null;
       try {
@@ -298,7 +318,11 @@ export async function POST(request: NextRequest) {
         for (const attempt of parisAttempts) {
           if (attempt.message) failed.push({ candidate: attempt.candidate, message: attempt.message });
           else {
-            parisDocuments.push(...attempt.documents);
+            parisDocuments.push(...attempt.documents.map((document) => ({
+              document,
+              orderId: attempt.candidate.order_id,
+              productSummary: attempt.candidate.product_summary,
+            })));
             completed.push({ candidate: attempt.candidate, shipmentId: null });
           }
         }
@@ -341,6 +365,7 @@ export async function POST(request: NextRequest) {
     const walmartCandidates = candidatesResult.rows.filter(
       (candidate) => candidate.marketplace === MARKETPLACES.WALMART,
     );
+    const walmartDocuments: WalmartLabelPrintInput[] = [];
     const walmartAttempts = await mapWithConcurrency(walmartCandidates, 3, async (candidate) => {
       try {
         const result = await prepareWalmartShippingLabelPdfs(candidate.order_id);
@@ -363,7 +388,11 @@ export async function POST(request: NextRequest) {
       if (attempt.message) {
         failed.push({ candidate: attempt.candidate, message: attempt.message });
       } else {
-        sourceDocuments.push(...attempt.documents);
+        walmartDocuments.push(...attempt.documents.map((document) => ({
+          document,
+          orderId: attempt.candidate.order_id,
+          productSummary: attempt.candidate.product_summary,
+        })));
         completed.push({ candidate: attempt.candidate, shipmentId: null });
         await pool.query(
           `UPDATE order_detail
@@ -380,6 +409,9 @@ export async function POST(request: NextRequest) {
           [attempt.candidate.id],
         );
       }
+    }
+    if (walmartDocuments.length > 0) {
+      sourceDocuments.push(await composeWalmartLabelsWithProductSummaryPdf(walmartDocuments));
     }
 
     if (completed.length === 0) {

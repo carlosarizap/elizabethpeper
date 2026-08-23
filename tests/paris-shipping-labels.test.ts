@@ -80,7 +80,11 @@ test('París compone cuatro etiquetas en una sola hoja carta', async () => {
     documents.push(await source.save());
   }
 
-  const result = await composeParisLabelsLetterGridPdf(documents);
+  const result = await composeParisLabelsLetterGridPdf(documents.map((document, index) => ({
+    document,
+    orderId: `313570000${index}`,
+    productSummary: '2 - Juego de Sábanas 1 Plaza\n1 - Funda de Cojín',
+  })));
   const output = await PDFDocument.load(result);
 
   assert.equal(output.getPageCount(), 1);

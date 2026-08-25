@@ -494,8 +494,9 @@ export async function upsertMercadoLibreOrder(order: MercadoLibreOrderInput) {
         );
       }
 
-      const existingDate = header.delivery_date?.toISOString().split('T')[0] ?? null;
-      const newDate = order.deliveryDate?.trim() || null;
+      const existingDate = header.delivery_date?.toISOString() ?? null;
+      const rawNewDate = order.deliveryDate?.trim() || null;
+      const newDate = rawNewDate ? new Date(rawNewDate).toISOString() : null;
       const documentType = header.has_invoice || header.document_type === 'factura'
         ? header.document_type
         : order.documentType;

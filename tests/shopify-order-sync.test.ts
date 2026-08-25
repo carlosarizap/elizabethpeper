@@ -8,6 +8,7 @@ import {
   expandShopifyLineItemUnits,
   getShopifyDeliveryDate,
   getShopifyMarketplaceItemId,
+  getShopifyProductDisplayTitle,
   getShopifyShippingAmount,
   getShopifyUnitPrice,
   normalizeShopifyOrder,
@@ -44,6 +45,33 @@ test('Shopify conserva el formato historico de order_id y resuelve su GID', () =
   assert.equal(toShopifyOrderId(order.id, order.name), '#1071-123456');
   assert.equal(toShopifyOrderGid('#1071-123456'), order.id);
   assert.equal(toShopifyOrderGid(order.id), order.id);
+});
+
+test('Shopify muestra el detalle de la variante junto al producto', () => {
+  assert.equal(
+    getShopifyProductDisplayTitle({
+      ...line,
+      title: 'Funda Cojin Decorativo Diseño Lino Terracota',
+      variantTitle: '60x60 / Con Relleno',
+    }),
+    'Funda Cojin Decorativo Diseño Lino Terracota · 60x60 / Con Relleno',
+  );
+});
+
+test('Shopify no duplica una variante ya incluida ni muestra Default Title', () => {
+  assert.equal(
+    getShopifyProductDisplayTitle({
+      ...line,
+      title: null,
+      name: 'Funda Cojin · 60x60 / Con Relleno',
+      variantTitle: '60x60 / Con Relleno',
+    }),
+    'Funda Cojin · 60x60 / Con Relleno',
+  );
+  assert.equal(
+    getShopifyProductDisplayTitle({ ...line, variantTitle: 'Default Title' }),
+    'Producto Shopify',
+  );
 });
 
 test('sincronizacion Shopify filtra por updated_at', () => {

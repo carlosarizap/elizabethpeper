@@ -7,7 +7,28 @@ import {
   inferMercadoLibreDocumentType,
   isCertainFullLineReturn,
   isMercadoLibreReturnClaim,
+  resolveMercadoLibreDispatchDeadline,
 } from '../src/app/lib/mercadolibre/order-sync.ts';
+
+test('usa el SLA como plazo operativo y no la entrega estimada al comprador', () => {
+  assert.equal(
+    resolveMercadoLibreDispatchDeadline({
+      slaExpectedDate: '2026-08-25T13:00:00-04:00',
+      preparationDeadline: '2026-08-24T18:36:56-04:00',
+    }),
+    '2026-08-25T13:00:00-04:00',
+  );
+});
+
+test('usa el plazo de preparación mientras Mercado Libre todavía no publica el SLA', () => {
+  assert.equal(
+    resolveMercadoLibreDispatchDeadline({
+      slaExpectedDate: null,
+      preparationDeadline: '2026-08-25T10:51:21-04:00',
+    }),
+    '2026-08-25T10:51:21-04:00',
+  );
+});
 
 test('extrae RUT y ciudad desde billing_info MLC', () => {
   const payload = {

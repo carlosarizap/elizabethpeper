@@ -11,6 +11,7 @@ import {
   inferMercadoLibreDocumentType,
   isCertainFullLineReturn,
   isMercadoLibreReturnClaim,
+  resolveMercadoLibreDispatchDeadline,
 } from '@/app/lib/mercadolibre/order-sync';
 import {
   aggregateMercadoLibreOrderStatuses,
@@ -74,6 +75,7 @@ interface MercadoLibreShipment {
     estimated_delivery_time?: { date?: unknown } | null;
   } | null;
   lead_time?: {
+    estimated_schedule_limit?: { date?: unknown } | null;
     estimated_delivery_time?: { date?: unknown } | null;
   } | null;
   estimated_delivery_time?: { date?: unknown } | null;
@@ -248,14 +250,6 @@ async function hydrateOrdersAndPacks(
   }
 
   return [...orders.values()];
-}
-
-function getShipmentDeliveryDate(shipment: MercadoLibreShipment | null): string | null {
-  return (
-    stringValue(shipment?.lead_time?.estimated_delivery_time?.date) ??
-    stringValue(shipment?.shipping_option?.estimated_delivery_time?.date) ??
-    stringValue(shipment?.estimated_delivery_time?.date)
-  );
 }
 
 async function fetchReturnClaims(
@@ -553,9 +547,13 @@ export async function GET(request: NextRequest) {
           shipmentStatus,
         );
 
-        const deliveryDate = getShipmentDeliveryDate(shipment) ?? (
-          shipmentId ? await getShipmentSlaDate(shipmentId) : null
-        );
+        const slaExpectedDate = shipmentId
+          ? await getShipmentSlaDate(shipmentId)
+          : null;
+        const deliveryDate = resolveMercadoLibreDispatchDeadline({
+          slaExpectedDate,
+          preparationDeadline: shipment?.lead_time?.estimated_schedule_limit?.date,
+        });
         if (deliveryDate) deliveryDates.push(deliveryDate);
         fallbackShippingAmounts.push(numericValue(order.shipping_cost));
 

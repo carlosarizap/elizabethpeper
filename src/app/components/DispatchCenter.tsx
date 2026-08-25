@@ -35,6 +35,7 @@ interface UnifiedOrder {
   marketplace: SupportedMarketplace;
   orderId: string;
   deliveryDate: string;
+  deliveryDeadline: string | null;
   productSummary: string;
   totalUnits: number;
   printCount: number;
@@ -100,6 +101,18 @@ function dateHeading(dateKey: string): string {
   return prefix ? `${prefix}, ${formatted}` : formatted;
 }
 
+function deadlineTimeLabel(deadline: string | null): string | null {
+  if (!deadline) return null;
+  const parsed = new Date(deadline);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Intl.DateTimeFormat('es-CL', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'America/Santiago',
+  }).format(parsed);
+}
+
 function mergeOrders(
   mercadoLibre: MercadoLibreDispatchOrder[],
   falabella: FalabellaDispatchOrder[],
@@ -115,6 +128,7 @@ function mergeOrders(
       marketplace: 'mercado_libre',
       orderId: order.orderId,
       deliveryDate: order.deliveryDate,
+      deliveryDeadline: order.deliveryDeadline,
       productSummary: order.productSummary,
       totalUnits: order.totalUnits,
       printCount: order.printCount,
@@ -130,6 +144,7 @@ function mergeOrders(
       marketplace: 'falabella',
       orderId: order.orderId,
       deliveryDate: order.deliveryDate,
+      deliveryDeadline: null,
       productSummary: order.productSummary,
       totalUnits: order.totalUnits,
       printCount: order.printCount,
@@ -146,6 +161,7 @@ function mergeOrders(
       marketplace: 'paris',
       orderId: order.orderId,
       deliveryDate: order.deliveryDate,
+      deliveryDeadline: null,
       productSummary: order.productSummary,
       totalUnits: order.totalUnits,
       printCount: order.printCount,
@@ -162,6 +178,7 @@ function mergeOrders(
       marketplace: 'ripley',
       orderId: order.orderId,
       deliveryDate: order.deliveryDate,
+      deliveryDeadline: null,
       productSummary: order.productSummary,
       totalUnits: order.totalUnits,
       printCount: order.printCount,
@@ -170,7 +187,7 @@ function mergeOrders(
       confirmed: false,
       reason: ripleyIntegration.connected
         ? order.printCount === 0 ? 'La disponibilidad se comprobará al imprimir.' : null
-        : ripleyIntegration.message ?? 'Pendiente de credenciales API de Seller Center Ripley.',
+        : ripleyIntegration.message ?? 'Configura la clave SVC de Seller Center Ripley.',
     })),
     ...walmart.map((order): UnifiedOrder => ({
       key: `walmart:${order.id}`,
@@ -178,6 +195,7 @@ function mergeOrders(
       marketplace: 'walmart',
       orderId: order.orderId,
       deliveryDate: order.deliveryDate,
+      deliveryDeadline: null,
       productSummary: order.productSummary,
       totalUnits: order.totalUnits,
       printCount: order.printCount,
@@ -517,7 +535,7 @@ export default function DispatchCenter() {
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-3 py-2 text-xs">
-            <p className="max-w-5xl text-slate-500">Mercado Libre imprime en carta horizontal; Falabella confirma y agrupa hasta 4 etiquetas por hoja; París y Walmart agregan el contenido del paquete a cada etiqueta; Ripley queda pendiente de su acceso SVC. Las no disponibles se omiten sin detener el lote.</p>
+            <p className="max-w-5xl text-slate-500">Mercado Libre imprime en carta horizontal; Falabella confirma y agrupa hasta 4 etiquetas por hoja; París y Walmart agregan el contenido del paquete; Ripley descarga directamente desde SVC. Las no disponibles se omiten sin detener el lote.</p>
             <div className="flex flex-wrap gap-2.5">
               <button type="button" onClick={() => setSelection(defaultSelection(orders))} className="font-semibold text-blue-600">Seleccionar pendientes</button>
               <button type="button" onClick={() => setSelection(new Set(orders.filter((order) => order.selectable).map((order) => order.key)))} className="font-semibold text-blue-600">Seleccionar imprimibles</button>
@@ -550,7 +568,12 @@ export default function DispatchCenter() {
                           <div className="flex items-center gap-2"><div className="flex h-10 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white px-1.5 shadow-sm"><Image src={marketplace.logo} alt={marketplace.label} width={52} height={36} className="max-h-8 w-auto object-contain" /></div><span className="text-sm font-semibold text-slate-700">{marketplace.label}</span></div>
                           <div><p className="font-semibold text-slate-900">{order.orderId}</p>{order.mercadoLibre?.shipment ? <p className="mt-1 text-xs text-slate-500">Envío {order.mercadoLibre.shipment.externalShipmentId}</p> : null}</div>
                           <div><p className="text-sm text-slate-700">{order.productSummary}</p><p className="mt-1 text-xs text-slate-500">{order.totalUnits} unidad(es)</p></div>
-                          <div><p className="text-sm font-medium capitalize text-slate-700">{new Intl.DateTimeFormat('es-CL', { day: '2-digit', month: 'short', timeZone: 'UTC' }).format(new Date(`${order.deliveryDate}T12:00:00Z`))}</p></div>
+                          <div>
+                            <p className="text-sm font-medium capitalize text-slate-700">{new Intl.DateTimeFormat('es-CL', { day: '2-digit', month: 'short', timeZone: 'UTC' }).format(new Date(`${order.deliveryDate}T12:00:00Z`))}</p>
+                            {order.marketplace === 'mercado_libre' && deadlineTimeLabel(order.deliveryDeadline)
+                              ? <p className="mt-1 text-xs text-slate-500">Hasta las {deadlineTimeLabel(order.deliveryDeadline)} hrs</p>
+                              : null}
+                          </div>
                           <div className="lg:text-right">
                             {order.marketplace === 'falabella' && order.confirmed ? <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">Lista para despachar</span> : order.printCount > 0 ? <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">Impresión solicitada · {order.printCount}</span> : order.marketplace === 'walmart' && order.confirmed ? <span className="inline-flex rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700">Aprobada · lista para imprimir</span> : order.waitingForLabel ? <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">Esperando etiqueta</span> : order.selectable ? <span className="inline-flex rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700">Pendiente de impresión</span> : <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">No disponible</span>}
                             {order.reason ? <p className="mt-2 text-xs text-slate-500">{order.reason}</p> : null}

@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 const AUTH_PATH = '/api/current/auth/login/vendor';
 const FAST_MANAGEMENT_ORDERS_PATH = '/api/v3/orders/order/list';
 const LABEL_DOWNLOAD_PATH = '/api/v7/label/label/download/';
+const DEFAULT_BASE_URL = 'https://sellercenter.ripleylabs.com';
+const DEFAULT_USERNAME = 'seller_elipeper';
 const REQUEST_TIMEOUT_MS = 30_000;
 const TOKEN_FALLBACK_TTL_MS = 10 * 60_000;
 const TOKEN_EXPIRY_MARGIN_MS = 60_000;
@@ -73,14 +75,29 @@ function cleanBaseUrl(value: string): string {
   return value.trim().replace(/\/+$/, '');
 }
 
-function readConfig(): RipleySvcConfig {
-  const baseUrl = cleanBaseUrl(process.env.RIPLEY_SVC_URL ?? '');
-  const username = process.env.RIPLEY_SVC_USERNAME?.trim() ?? '';
-  const password = process.env.RIPLEY_SVC_PASSWORD ?? '';
+function splitApiKey(value: string): { username: string; password: string } | null {
+  const separator = value.indexOf(':');
+  if (separator <= 0 || separator === value.length - 1) return null;
+  return {
+    username: value.slice(0, separator).trim(),
+    password: value.slice(separator + 1),
+  };
+}
 
-  if (!baseUrl || !username || !password) {
+export function createRipleySvcBasicAuthorization(username: string, password: string): string {
+  return `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
+}
+
+function readConfig(): RipleySvcConfig {
+  const baseUrl = cleanBaseUrl(process.env.RIPLEY_SVC_URL?.trim() || DEFAULT_BASE_URL);
+  const apiKey = splitApiKey(process.env.RIPLEY_SVC_API_KEY ?? '');
+  const username = apiKey?.username
+    ?? (process.env.RIPLEY_SVC_USERNAME?.trim() || DEFAULT_USERNAME);
+  const password = apiKey?.password ?? process.env.RIPLEY_SVC_PASSWORD ?? '';
+
+  if (!password) {
     throw new RipleySvcError(
-      'Configura RIPLEY_SVC_URL, RIPLEY_SVC_USERNAME y RIPLEY_SVC_PASSWORD con las credenciales API entregadas por Ripley.',
+      'Configura RIPLEY_SVC_API_KEY como usuario:contraseña o RIPLEY_SVC_PASSWORD con la contraseña vigente de Seller Center Ripley.',
     );
   }
 
@@ -152,7 +169,7 @@ async function authenticate(config: RipleySvcConfig, forceRefresh = false): Prom
     method: 'POST',
     headers: {
       Accept: 'application/json',
-      Authorization: `Basic ${Buffer.from(`${config.username}:${config.password}`).toString('base64')}`,
+      Authorization: createRipleySvcBasicAuthorization(config.username, config.password),
     },
     cache: 'no-store',
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -163,7 +180,7 @@ async function authenticate(config: RipleySvcConfig, forceRefresh = false): Prom
   if (!response.ok || !token) {
     if (response.status === 401 || response.status === 403) {
       throw new RipleySvcError(
-        'Ripley rechazó las credenciales API de SVC. El usuario normal del portal no sirve para esta API; solicita credenciales de integrador.',
+        'Ripley rechazó el acceso API SVC. Si seller_elipeper puede ingresar al portal con la misma contraseña, solicita a soporte que habilite o sincronice sus credenciales para /api/current/auth/login/vendor.',
         response.status,
       );
     }
@@ -316,9 +333,8 @@ export async function getRipleySvcConnectionStatus(): Promise<RipleySvcConnectio
     return { configured: true, connected: true, message: null };
   } catch (error) {
     const configured = Boolean(
-      process.env.RIPLEY_SVC_URL
-      && process.env.RIPLEY_SVC_USERNAME
-      && process.env.RIPLEY_SVC_PASSWORD,
+      splitApiKey(process.env.RIPLEY_SVC_API_KEY ?? '')
+      || process.env.RIPLEY_SVC_PASSWORD,
     );
     return {
       configured,

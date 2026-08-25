@@ -71,6 +71,7 @@ const ORDER_CORE_FIELDS = `
       id
       title
       name
+      variantTitle
       sku
       quantity
       currentQuantity

@@ -1,6 +1,10 @@
 import pool from '@/app/lib/db';
 import { unstable_noStore as noStore } from 'next/cache';
 import { OrderHeader } from '../definitions/order_header';
+import {
+  getFilledProductUnitCount,
+  getProductSize,
+} from '../products/fill-classification';
 
 const ITEMS_PER_PAGE = 150;
 const DASHBOARD_MONTH_FILTER = `
@@ -100,12 +104,12 @@ export async function fetchOrders(page: number = 1, query: string = '') {
 
     for (const row of result.rows) {
       const title = row.product_title?.toLowerCase() || '';
-      if (title.includes("relleno")) {
-        const match = title.match(/(\d{2}x\d{2})/);
-        if (match) {
-          const medida = match[1];
+      const filledUnits = getFilledProductUnitCount(title, Number(row.product_quantity));
+      if (filledUnits > 0) {
+        const medida = getProductSize(title);
+        if (medida) {
           if (!rellenos[medida]) rellenos[medida] = 0;
-          rellenos[medida] += row.product_quantity;
+          rellenos[medida] += filledUnits;
         }
       }
 
@@ -506,15 +510,13 @@ export async function fetchOrderStatsByMonth(year: number, month: number) {
         `, [year, month]),
         client.query(`
           SELECT
-            REGEXP_MATCHES(LOWER(od.product_title), '(\\d{2,3}x\\d{2,3})') AS medida,
+            od.product_title,
             COALESCE(SUM(od.product_quantity), 0) AS cantidad
           FROM order_detail od
           JOIN order_header oh ON od.id_order_header = oh.id
-          WHERE LOWER(od.product_title) LIKE '%relleno%'
-            AND ${DASHBOARD_MONTH_FILTER}
+          WHERE ${DASHBOARD_MONTH_FILTER}
             AND COALESCE(oh.status, '') <> 'cancelado'
-          GROUP BY medida
-          ORDER BY cantidad DESC
+          GROUP BY od.product_title
         `, [year, month]),
         client.query(`
           WITH days AS (
@@ -719,9 +721,12 @@ export async function fetchOrderStatsByMonth(year: number, month: number) {
     // Mapear rellenos a objeto clave-valor
     const rellenos: Record<string, number> = {};
     for (const row of rellenosQuery.rows) {
-      const medida = row.medida?.[0]; // REGEXP_MATCHES devuelve array
-      if (medida) {
-        rellenos[medida] = Number(row.cantidad);
+      const title = String(row.product_title ?? '');
+      const medida = getProductSize(title);
+      const filledUnits = getFilledProductUnitCount(title, Number(row.cantidad));
+      if (medida && filledUnits > 0) {
+        rellenos[medida] = (rellenos[medida] ?? 0) +
+          filledUnits;
       }
     }
 

@@ -11,6 +11,7 @@ export interface MercadoLibreDispatchOrder {
   id: string;
   orderId: string;
   deliveryDate: string;
+  deliveryDeadline: string | null;
   status: string;
   productSummary: string;
   totalUnits: number;

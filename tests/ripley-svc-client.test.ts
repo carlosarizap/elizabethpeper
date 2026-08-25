@@ -1,12 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  createRipleySvcBasicAuthorization,
   parseRipleyLabelDownloadResponse,
   RipleySvcError,
   ripleySvcError,
 } from '../src/app/lib/ripley/svc-client.ts';
 
 const PDF_BASE64 = Buffer.from('%PDF-1.4\n% test label').toString('base64');
+
+test('builds the SVC Basic credential from seller username and password', () => {
+  const authorization = createRipleySvcBasicAuthorization('seller_elipeper', 'secret');
+  assert.equal(
+    Buffer.from(authorization.replace(/^Basic /, ''), 'base64').toString('utf8'),
+    'seller_elipeper:secret',
+  );
+});
 
 test('parses a successful Ripley SVC label response', () => {
   const result = parseRipleyLabelDownloadResponse(

@@ -7,6 +7,7 @@ import { OrderHeader } from "../lib/definitions/order_header";
 import LoadingSpinner from "../components/LoadingSpinner";
 import OrderStatusBadge from "../components/OrderStatusBadge";
 import StatusRefreshToast, { ToastFeedback } from "../components/StatusRefreshToast";
+import { isFilledProductTitle } from "../lib/products/fill-classification";
 
 const getMarketplaceLogo = (marketplace: Marketplace) => {
   return `/marketplaces/${marketplace}.png`;
@@ -180,17 +181,16 @@ const OrderList = () => {
           </thead>
           <tbody className="divide-y divide-gray-200 print:divide-gray-400">
             {orders.map((orderHeader, orderIndex) => {
-              const isRelleno = orderHeader.details.some(detail =>
-                detail.product_title.toLowerCase().includes('relleno')
-              );
-              const rowClassBase = `
-      ${orderIndex % 2 === 0 ? "bg-white print:bg-white" : "bg-gray-50 print:bg-gray-100"} 
-${isRelleno ? "bg-yellow-300 print:bg-yellow-100" : ""}
-      border-t border-gray-200 print:border-gray-400 print:text-xs print:h-[20px]
-    `;
+              return orderHeader.details.map((detail, detailIndex) => {
+                const isRelleno = isFilledProductTitle(detail.product_title);
+                const rowClass = `
+                  ${orderIndex % 2 === 0 ? "bg-white print:bg-white" : "bg-gray-50 print:bg-gray-100"}
+                  ${isRelleno ? "bg-yellow-300 print:bg-yellow-100" : ""}
+                  border-t border-gray-200 print:border-gray-400 print:text-xs print:h-[20px]
+                `;
 
-              return orderHeader.details.map((detail, detailIndex) => (
-                <tr key={detail.id} className={rowClassBase}>
+                return (
+                <tr key={detail.id} className={rowClass}>
                   <td className="px-2 py-1 print:py-0.5">{detail.product_quantity}</td>
                   <td className="px-2 py-1 print:py-0.5">{detail.product_title}</td>
 
@@ -245,7 +245,8 @@ ${isRelleno ? "bg-yellow-300 print:bg-yellow-100" : ""}
                     <input type="checkbox" />
                   </td>
                 </tr>
-              ));
+                );
+              });
             })}
           </tbody>
 

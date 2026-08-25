@@ -10,6 +10,11 @@ export interface MercadoLibreInvoiceData {
   billingCity: string | null;
 }
 
+export interface MercadoLibreDispatchDeadlineInput {
+  slaExpectedDate?: unknown;
+  preparationDeadline?: unknown;
+}
+
 function asRecord(value: unknown): UnknownRecord | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as UnknownRecord
@@ -21,6 +26,13 @@ function scalarString(value: unknown): string | null {
     return value.toString();
   }
   return cleanNullableString(value);
+}
+
+export function resolveMercadoLibreDispatchDeadline(
+  input: MercadoLibreDispatchDeadlineInput,
+): string | null {
+  return scalarString(input.slaExpectedDate)
+    ?? scalarString(input.preparationDeadline);
 }
 
 function getBillingInfoRoot(payload: unknown): UnknownRecord | null {

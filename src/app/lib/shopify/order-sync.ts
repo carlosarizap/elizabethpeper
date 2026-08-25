@@ -22,6 +22,7 @@ export interface ShopifyLineItem {
   id?: string | null;
   title?: string | null;
   name?: string | null;
+  variantTitle?: string | null;
   sku?: string | null;
   quantity?: number | null;
   currentQuantity?: number | null;
@@ -190,6 +191,21 @@ export function getShopifyMarketplaceItemId(
   unitIndex = 0,
 ): string {
   return unitIndex === 0 ? lineItemId : `${lineItemId}:unit:${unitIndex + 1}`;
+}
+
+export function getShopifyProductDisplayTitle(line: ShopifyLineItem): string {
+  const productTitle = line.title?.trim() || line.name?.trim() || line.sku?.trim() || 'Sin titulo';
+  const variantTitle = line.variantTitle?.trim();
+
+  if (!variantTitle || variantTitle.toLocaleLowerCase('es') === 'default title') {
+    return productTitle;
+  }
+
+  const normalizedProduct = productTitle.toLocaleLowerCase('es');
+  const normalizedVariant = variantTitle.toLocaleLowerCase('es');
+  return normalizedProduct.includes(normalizedVariant)
+    ? productTitle
+    : `${productTitle} · ${variantTitle}`;
 }
 
 export function getShopifyUnitPrice(line: ShopifyLineItem): number {
@@ -475,7 +491,7 @@ export function expandShopifyLineItemUnits(
     }
   }
 
-  const productTitle = line.title?.trim() || line.name?.trim() || line.sku?.trim() || 'Sin titulo';
+  const productTitle = getShopifyProductDisplayTitle(line);
   const productPrice = getShopifyUnitPrice(line);
   return statuses.map((status, unitIndex) => ({
     marketplaceItemId: getShopifyMarketplaceItemId(lineItemId, unitIndex),

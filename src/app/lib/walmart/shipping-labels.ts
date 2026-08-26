@@ -243,11 +243,15 @@ function acknowledgementBody(order: WalmartOrder) {
   };
 }
 
+export function getWalmartAcknowledgePath(purchaseOrderId: string): string {
+  return `/v3/orders/${encodeURIComponent(purchaseOrderId)}/acknowledgeLines`;
+}
+
 export async function acknowledgeWalmartOrder(order: WalmartOrder): Promise<WalmartOrder> {
   const purchaseOrderId = String(order.purchaseOrderId ?? '').trim();
   if (!purchaseOrderId) throw new Error('La orden Walmart no tiene un identificador válido.');
   const response = await walmartRequest(
-    `/v3/orders/${encodeURIComponent(purchaseOrderId)}/acknowledge`,
+    getWalmartAcknowledgePath(purchaseOrderId),
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

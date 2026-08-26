@@ -199,8 +199,8 @@ export function getWalmartOrderDate(order: WalmartOrder): string | null {
 
 export function getWalmartDeliveryDate(order: WalmartOrder): string | null {
   const candidates = [
-    order.shippingInfo?.estimatedDeliveryDate,
     order.shippingInfo?.estimatedShipDate,
+    order.shippingInfo?.estimatedDeliveryDate,
   ];
 
   for (const candidate of candidates) {

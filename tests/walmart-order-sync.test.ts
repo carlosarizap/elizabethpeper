@@ -97,7 +97,7 @@ test('Walmart calcula el despacho pagado descontando SHIP_DISC', () => {
   assert.equal(getWalmartShippingAmount(order), 0);
 });
 
-test('Walmart usa estimatedDeliveryDate en Chile sin sumar dias', () => {
+test('Walmart usa estimatedShipDate como fecha limite de despacho', () => {
   assert.equal(
     getWalmartDeliveryDate({
       shippingInfo: {
@@ -105,7 +105,7 @@ test('Walmart usa estimatedDeliveryDate en Chile sin sumar dias', () => {
         estimatedShipDate: 1780336800000,
       },
     }),
-    '2026-06-04',
+    '2026-06-01',
   );
 });
 
@@ -116,10 +116,10 @@ test('Walmart conserva orderDate como fecha real de la venta', () => {
   );
 });
 
-test('Walmart usa estimatedShipDate solo como fallback real', () => {
+test('Walmart usa estimatedDeliveryDate si no viene fecha de despacho', () => {
   assert.equal(
-    getWalmartDeliveryDate({ shippingInfo: { estimatedShipDate: 1780336800000 } }),
-    '2026-06-01',
+    getWalmartDeliveryDate({ shippingInfo: { estimatedDeliveryDate: 1780567200000 } }),
+    '2026-06-04',
   );
 });
 

@@ -3,6 +3,7 @@ import test from 'node:test';
 import { PDFDocument } from 'pdf-lib';
 import {
   composeWalmartLabelsWithProductSummaryPdf,
+  getWalmartAcknowledgePath,
   getWalmartCurrentStatuses,
   getWalmartLabelEligibility,
   getWalmartTrackingNumbers,
@@ -31,6 +32,13 @@ function orderWithStatuses(
     },
   };
 }
+
+test('Walmart Chile aprueba líneas mediante el endpoint Global 3.1', () => {
+  assert.equal(
+    getWalmartAcknowledgePath('P100/CL'),
+    '/v3/orders/P100%2FCL/acknowledgeLines',
+  );
+});
 
 test('Walmart aprueba automáticamente las órdenes Created', () => {
   assert.deepEqual(

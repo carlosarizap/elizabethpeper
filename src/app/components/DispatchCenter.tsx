@@ -539,7 +539,7 @@ export default function DispatchCenter() {
             <div className="flex flex-wrap gap-2.5">
               <button type="button" onClick={() => setSelection(defaultSelection(orders))} className="font-semibold text-blue-600">Seleccionar pendientes</button>
               <button type="button" onClick={() => setSelection(new Set(orders.filter((order) => order.selectable).map((order) => order.key)))} className="font-semibold text-blue-600">Seleccionar imprimibles</button>
-              <button type="button" onClick={() => setSelection(new Set())} className="font-semibold text-slate-500">Limpiar</button>
+              <button type="button" onClick={() => setSelection(new Set())} className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1 font-bold text-red-700 transition hover:border-red-300 hover:bg-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2">Limpiar</button>
             </div>
           </div>
 

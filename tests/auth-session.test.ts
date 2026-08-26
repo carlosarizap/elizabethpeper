@@ -17,7 +17,9 @@ test('crea y verifica una sesión firmada', async () => {
 test('rechaza una sesión modificada', async () => {
   process.env.APP_PASSWORD = 'test-password';
   const token = await createSessionToken('epeper', 60);
-  const tamperedToken = `${token.slice(0, -1)}${token.endsWith('a') ? 'b' : 'a'}`;
+  const [payload, signature] = token.split('.');
+  const tamperedSignature = `${signature[0] === 'a' ? 'b' : 'a'}${signature.slice(1)}`;
+  const tamperedToken = `${payload}.${tamperedSignature}`;
 
   assert.equal(await verifySessionToken(tamperedToken), null);
 });

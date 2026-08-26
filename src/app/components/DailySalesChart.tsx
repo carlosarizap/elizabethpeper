@@ -1,4 +1,7 @@
+'use client';
+
 import { DailySalesStat } from '@/app/lib/definitions/dashboard';
+import { useState } from 'react';
 
 const currency = new Intl.NumberFormat('es-CL', {
   style: 'currency',
@@ -11,6 +14,7 @@ interface Props {
 }
 
 export default function DailySalesChart({ data }: Props) {
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const maximum = Math.max(...data.map((entry) => entry.total_ventas), 0);
   const daysWithSales = data.filter((entry) => entry.total_ordenes > 0);
   const average = daysWithSales.length
@@ -41,9 +45,11 @@ export default function DailySalesChart({ data }: Props) {
         </div>
       </div>
 
-      <div className="overflow-x-auto pb-2">
+      <div className="overflow-x-auto pb-2" onScroll={() => setSelectedDay(null)}>
         <div className="flex h-64 min-w-[760px] items-end gap-1.5 border-b border-slate-200 px-1 pt-8">
           {data.map((entry, index) => {
+            const isSelected = selectedDay === entry.day;
+            const tooltipId = `daily-sales-tooltip-${entry.day}`;
             const height = maximum > 0 ? (entry.total_ventas / maximum) * 100 : 0;
             const visibleHeight = entry.total_ventas > 0 ? Math.max(height, 4) : 1;
             const tooltipPosition =
@@ -57,13 +63,26 @@ export default function DailySalesChart({ data }: Props) {
               <button
                 type="button"
                 key={entry.day}
-                className="group flex h-full min-w-0 flex-1 flex-col items-center outline-none"
+                className="group flex h-full min-w-0 flex-1 touch-manipulation flex-col items-center rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                aria-describedby={isSelected ? tooltipId : undefined}
+                aria-expanded={isSelected}
                 aria-label={`Día ${entry.day}: ${currency.format(entry.total_ventas)}, ${entry.total_ordenes} órdenes`}
                 title={`Día ${entry.day}: ${currency.format(entry.total_ventas)} · ${entry.total_ordenes} órdenes`}
+                onClick={() => {
+                  setSelectedDay((currentDay) =>
+                    currentDay === entry.day ? null : entry.day,
+                  );
+                }}
               >
                 <div className="relative flex w-full flex-1 items-end">
                   <div
-                    className={`pointer-events-none absolute top-2 z-20 hidden w-max rounded-lg bg-slate-900 px-3 py-2 text-left text-xs text-white shadow-lg group-hover:block group-focus:block ${tooltipPosition}`}
+                    id={tooltipId}
+                    role="tooltip"
+                    className={`pointer-events-none absolute top-2 z-20 w-max rounded-lg bg-slate-900 px-3 py-2 text-left text-xs text-white shadow-lg ${
+                      isSelected
+                        ? 'block'
+                        : 'hidden group-hover:block group-focus-visible:block'
+                    } ${tooltipPosition}`}
                   >
                     <p className="text-[10px] font-medium uppercase tracking-wide text-slate-300">
                       Día {entry.day}
@@ -76,8 +95,12 @@ export default function DailySalesChart({ data }: Props) {
                   <div
                     className={`w-full rounded-t-md transition-colors ${
                       entry.total_ventas > 0
-                        ? 'bg-blue-500 group-hover:bg-blue-600'
-                        : 'bg-slate-100'
+                        ? isSelected
+                          ? 'bg-blue-700'
+                          : 'bg-blue-500 group-hover:bg-blue-600'
+                        : isSelected
+                          ? 'bg-slate-300'
+                          : 'bg-slate-100'
                     }`}
                     style={{ height: `${visibleHeight}%` }}
                   />

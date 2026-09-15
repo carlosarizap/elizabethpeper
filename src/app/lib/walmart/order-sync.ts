@@ -197,6 +197,17 @@ export function getWalmartOrderDate(order: WalmartOrder): string | null {
   return parsed ? parsed.toISOString() : null;
 }
 
+export function getWalmartSyncWindow(now: Date, days: number) {
+  const end = new Date(now);
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - days);
+
+  return {
+    startTimestamp: start.toISOString(),
+    endTimestamp: end.toISOString(),
+  };
+}
+
 export function getWalmartDeliveryDate(order: WalmartOrder): string | null {
   const candidates = [
     order.shippingInfo?.estimatedShipDate,

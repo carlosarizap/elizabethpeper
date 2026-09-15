@@ -2,7 +2,11 @@ import pool from '@/app/lib/db';
 import axios from 'axios';
 import { getFalabellaSignature } from './signature-helper';
 import { fetchOrderItems } from '@/app/lib/falabella/fetch-order-items'; // <-- ahora lo modularizamos
-import { getFalabellaInvoiceType } from '../invoices/invoice-upload-utils.ts';
+import {
+    falabellaItemsAreReadyForInvoice,
+    getFalabellaInvoiceType,
+    getFalabellaRetryOrderItemIds,
+} from '../invoices/invoice-upload-utils.ts';
 
 export async function uploadInvoicesToFalabella() {
     const client = await pool.connect();
@@ -46,6 +50,14 @@ export async function uploadInvoicesToFalabella() {
                     continue;
                 }
 
+                if (!falabellaItemsAreReadyForInvoice(items)) {
+                    console.log(
+                        `⏳ Documento Falabella aplazado para orden: ${order.order_id}. ` +
+                        'La orden todavía no alcanza ready_to_ship.'
+                    );
+                    continue;
+                }
+
                 const orderItemIds = items.map((item: any) => item.OrderItemId);
 
                 // 2. Firmar headers
@@ -69,7 +81,7 @@ export async function uploadInvoicesToFalabella() {
                     : today.toISOString().split('T')[0];
 
                 const body = {
-                    orderItemIds: orderItemIds,
+                    orderItemIds,
                     invoiceNumber: order.order_id,
                     invoiceDate: invoiceDateStr,
                     invoiceType: getFalabellaInvoiceType(order.document_type),
@@ -79,14 +91,37 @@ export async function uploadInvoicesToFalabella() {
                 };
 
                 // 4. Hacer POST
-                const response = await axios.post(
+                const upload = (ids: string[]) => axios.post(
                     'https://sellercenter-api.falabella.com/v1/marketplace-sellers/invoice/pdf',
-                    body,
+                    { ...body, orderItemIds: ids },
                     { headers }
                 );
 
+                let uploadedOrderItemIds = orderItemIds;
+                let response;
+                try {
+                    response = await upload(orderItemIds);
+                } catch (firstError: any) {
+                    const retryOrderItemIds = getFalabellaRetryOrderItemIds(
+                        orderItemIds,
+                        firstError.response?.data,
+                    );
+                    const canRetry = retryOrderItemIds.length > 0
+                        && retryOrderItemIds.length < orderItemIds.length;
+                    if (!canRetry) throw firstError;
+
+                    console.warn(
+                        `↻ Falabella rechazó ${orderItemIds.length - retryOrderItemIds.length} ` +
+                        `ítem(s) duplicado(s) de la orden ${order.order_id}. ` +
+                        `Reintentando con ${retryOrderItemIds.length} identificador(es) válido(s).`
+                    );
+                    uploadedOrderItemIds = retryOrderItemIds;
+                    response = await upload(retryOrderItemIds);
+                }
+
                 console.log(
-                    `📤 ${body.invoiceType} subida correctamente para orden: ${order.order_id}`,
+                    `📤 ${body.invoiceType} subida correctamente para orden: ${order.order_id} ` +
+                    `(${uploadedOrderItemIds.length}/${orderItemIds.length} identificadores aceptados)`,
                     response.data
                 );
 

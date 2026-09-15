@@ -10,6 +10,7 @@ import {
   getWalmartOrderDate,
   getWalmartRawLineStatuses,
   getWalmartShippingAmount,
+  getWalmartSyncWindow,
   normalizeWalmartCursor,
   resolveWalmartOrderStatus,
   toArray,
@@ -217,18 +218,6 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-function syncWindow(days: number) {
-  const end = new Date();
-  const start = new Date(end);
-  start.setUTCDate(start.getUTCDate() - days);
-  return {
-    startDate: start.toISOString().slice(0, 10),
-    endDate: end.toISOString().slice(0, 10),
-    startTimestamp: start.toISOString(),
-    endTimestamp: end.toISOString(),
-  };
-}
-
 export async function GET(request: NextRequest) {
   const requestedPurchaseOrderId =
     request.nextUrl.searchParams.get('purchaseOrderId')?.trim() || undefined;
@@ -256,7 +245,7 @@ export async function GET(request: NextRequest) {
         returnOrders = await fetchWalmartReturnPages(accessToken, { customerOrderId });
       }
     } else if (mode === 'returns') {
-      const returnWindow = syncWindow(returnRecheckDays);
+      const returnWindow = getWalmartSyncWindow(new Date(), returnRecheckDays);
       const [activeOrderIds, recentReturns] = await Promise.all([
         getActiveWalmartOrderIds(),
         fetchWalmartReturnPages(accessToken, {
@@ -299,10 +288,10 @@ export async function GET(request: NextRequest) {
         if (purchaseOrderId) orders.set(purchaseOrderId, order);
       }
     } else {
-      const orderWindow = syncWindow(syncDays);
+      const orderWindow = getWalmartSyncWindow(new Date(), syncDays);
       const recentOrders = await fetchWalmartOrderPages(accessToken, {
-        createdStartDate: orderWindow.startDate,
-        createdEndDate: orderWindow.endDate,
+        createdStartDate: orderWindow.startTimestamp,
+        createdEndDate: orderWindow.endTimestamp,
       });
 
       recentCandidates = recentOrders.length;

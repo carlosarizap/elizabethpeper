@@ -6,6 +6,7 @@ import {
   findWalmartFiscalSignals,
   getWalmartDeliveryDate,
   getWalmartOrderDate,
+  getWalmartSyncWindow,
   getWalmartLineProductTotal,
   getWalmartMarketplaceItemId,
   getWalmartShippingAmount,
@@ -113,6 +114,22 @@ test('Walmart conserva orderDate como fecha real de la venta', () => {
   assert.equal(
     getWalmartOrderDate({ orderDate: 1786199590000 }),
     '2026-08-08T14:33:10.000Z',
+  );
+});
+
+test('Walmart consulta hasta la hora exacta y no corta el día UTC en la mañana', () => {
+  const window = getWalmartSyncWindow(
+    new Date('2026-09-14T11:00:00.000Z'),
+    4,
+  );
+
+  assert.deepEqual(window, {
+    startTimestamp: '2026-09-10T11:00:00.000Z',
+    endTimestamp: '2026-09-14T11:00:00.000Z',
+  });
+  assert.ok(
+    new Date('2026-09-14T03:17:51.000Z') < new Date(window.endTimestamp),
+    'la orden P111808237 debe quedar dentro de la ventana matutina',
   );
 });
 

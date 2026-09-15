@@ -25,6 +25,13 @@ export interface MercadoLibreLabelSnapshot {
   logisticType: string | null;
 }
 
+export function getMercadoLibreSlaDeadline(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const value = (payload as Record<string, unknown>).expected_date;
+  if (typeof value !== 'string') return null;
+  return value.trim() || null;
+}
+
 export function isMercadoLibreShipmentWaitingForLabel(
   shipment: MercadoLibreLabelSnapshot | null,
 ): boolean {

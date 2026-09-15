@@ -18,6 +18,7 @@ import { resolveParisExistingHeaderState } from '../paris/order-sync';
 import { resolveRipleyExistingHeaderStatus } from '../ripley/order-sync';
 import { resolveWalmartExistingHeaderStatus } from '../walmart/order-sync';
 import { resolveShopifyExistingHeaderStatus } from '../shopify/order-sync';
+import { isMercadoLibreFulfillmentShipment } from '../mercadolibre/order-sync';
 
 export async function createOrder(order: {
   orderId: string;
@@ -452,6 +453,7 @@ export interface MercadoLibreOrderInput {
   status: StandardOrderStatus;
   documentType: 'boleta' | 'factura';
   deliveryDate?: string | null;
+  deliveryDateSource?: 'sla' | 'predicted' | null;
   companyRut?: string | null;
   billingCity?: string | null;
   shipments?: readonly MercadoLibreShipmentInput[];
@@ -469,7 +471,7 @@ export async function upsertMercadoLibreOrder(order: MercadoLibreOrderInput) {
     );
 
     const existingHeader = await client.query(
-      `SELECT id, status, delivery_date, has_invoice, invoice_uploaded,
+      `SELECT id, status, delivery_date, delivery_date_source, has_invoice, invoice_uploaded,
               invoice_pdf, marketplace, document_type
        FROM order_header
        WHERE order_id = $1 AND marketplace = $2
@@ -497,6 +499,7 @@ export async function upsertMercadoLibreOrder(order: MercadoLibreOrderInput) {
       const existingDate = header.delivery_date?.toISOString() ?? null;
       const rawNewDate = order.deliveryDate?.trim() || null;
       const newDate = rawNewDate ? new Date(rawNewDate).toISOString() : null;
+      const effectiveNewDate = newDate ?? existingDate;
       const documentType = header.has_invoice || header.document_type === 'factura'
         ? header.document_type
         : order.documentType;
@@ -504,17 +507,22 @@ export async function upsertMercadoLibreOrder(order: MercadoLibreOrderInput) {
         `UPDATE order_header
          SET status = $1,
              shipping_amount = $2,
-             delivery_date = $3,
-             document_type = $4,
-             company_rut = COALESCE($5, company_rut),
-             billing_city = COALESCE($6, billing_city),
-             marketplace = $7,
+             delivery_date = COALESCE($3::timestamptz, delivery_date),
+             delivery_date_source = CASE
+               WHEN $3::timestamptz IS NULL THEN delivery_date_source
+               ELSE $4
+             END,
+             document_type = $5,
+             company_rut = COALESCE($6, company_rut),
+             billing_city = COALESCE($7, billing_city),
+             marketplace = $8,
              updated_at = NOW()
-         WHERE id = $8`,
+         WHERE id = $9`,
         [
           canUpdateStatus ? order.status : currentStatus,
           order.shippingAmount,
           newDate,
+          order.deliveryDateSource ?? null,
           documentType,
           order.companyRut ?? null,
           order.billingCity ?? null,
@@ -524,7 +532,7 @@ export async function upsertMercadoLibreOrder(order: MercadoLibreOrderInput) {
       );
 
       if (
-        existingDate !== newDate &&
+        existingDate !== effectiveNewDate &&
         header.has_invoice &&
         header.invoice_uploaded &&
         !header.invoice_pdf &&
@@ -539,16 +547,16 @@ export async function upsertMercadoLibreOrder(order: MercadoLibreOrderInput) {
         );
       }
     } else {
-      const isMercadoFull = !order.deliveryDate;
+      const isMercadoFull = isMercadoLibreFulfillmentShipment(order.shipments);
       const insertedHeader = await client.query(
         `INSERT INTO order_header (
            order_id, total_amount, shipping_amount, status, marketplace,
-           document_type, has_invoice, delivery_date, invoice_uploaded,
+           document_type, has_invoice, delivery_date, delivery_date_source, invoice_uploaded,
            return_status, company_rut, billing_city
          )
          VALUES (
-           $1, 0, $2, $3, $4, $5, $6, $7, $6,
-           'sin_devolucion', $8, $9
+           $1, 0, $2, $3, $4, $5, $6, $7, $8, $6,
+           'sin_devolucion', $9, $10
          )
          RETURNING id`,
         [
@@ -559,6 +567,7 @@ export async function upsertMercadoLibreOrder(order: MercadoLibreOrderInput) {
           order.documentType,
           isMercadoFull,
           order.deliveryDate ?? null,
+          order.deliveryDateSource ?? null,
           order.companyRut ?? null,
           order.billingCity ?? null,
         ],

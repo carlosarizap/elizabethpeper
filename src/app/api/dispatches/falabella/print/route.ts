@@ -3,9 +3,12 @@ import pool from '@/app/lib/db';
 import { MARKETPLACES } from '@/app/lib/constants/marketplaces';
 import type { DispatchPrintFailure, DispatchPrintResponse } from '@/app/lib/dispatches/definitions';
 import {
+  falabellaManifestError,
   falabellaPrintError,
   prepareFalabellaLabelAndConfirm,
 } from '@/app/lib/dispatches/falabella-print';
+import { createFalabellaForwardManifestPdfs } from '@/app/lib/falabella/seller-center-client';
+import { composeFalabellaLabelsLetterGridPdf } from '@/app/lib/falabella/shipping-label-layout';
 import { composeLetterLabelPdf } from '@/app/lib/mercadolibre/shipping-labels';
 
 export const dynamic = 'force-dynamic';
@@ -22,6 +25,7 @@ interface Candidate {
   id: string;
   order_id: string;
   order_item_ids: string[];
+  has_completed_print: boolean;
 }
 
 async function mapWithConcurrency<T, R>(
@@ -76,7 +80,13 @@ export async function POST(request: NextRequest) {
          oh.id,
          oh.order_id,
          ARRAY_AGG(od.marketplace_item_id ORDER BY od.marketplace_item_id)
-           FILTER (WHERE od.marketplace_item_id IS NOT NULL) AS order_item_ids
+           FILTER (WHERE od.marketplace_item_id IS NOT NULL) AS order_item_ids,
+         EXISTS (
+           SELECT 1
+           FROM dispatch_batch_item printed
+           WHERE printed.id_order_header = oh.id
+             AND printed.status = 'completed'
+         ) AS has_completed_print
        FROM order_header oh
        JOIN order_detail od ON od.id_order_header = oh.id
        WHERE oh.id = ANY($1::uuid[])
@@ -94,7 +104,7 @@ export async function POST(request: NextRequest) {
       try {
         return {
           candidate,
-          documents: await prepareFalabellaLabelAndConfirm({
+          prepared: await prepareFalabellaLabelAndConfirm({
             id: candidate.id,
             orderId: candidate.order_id,
             sellerCenterOrderId: candidate.order_id.split('-').at(-1) ?? candidate.order_id,
@@ -103,11 +113,28 @@ export async function POST(request: NextRequest) {
           error: null as string | null,
         };
       } catch (error) {
-        return { candidate, documents: [] as Uint8Array[], error: falabellaPrintError(error) };
+        return { candidate, prepared: null, error: falabellaPrintError(error) };
       }
     });
-    const successful = attempts.filter((attempt) => !attempt.error && attempt.documents.length > 0);
+    let successful = attempts.filter((attempt) => !attempt.error && attempt.prepared);
     const failed = attempts.filter((attempt) => Boolean(attempt.error));
+    const manifestCandidates = successful.filter((attempt) => !attempt.candidate.has_completed_print);
+    let manifestDocuments: Uint8Array[] = [];
+    if (manifestCandidates.length > 0) {
+      try {
+        manifestDocuments = await createFalabellaForwardManifestPdfs(
+          manifestCandidates.flatMap((attempt) => attempt.prepared?.orderItemIds ?? []),
+        );
+      } catch (error) {
+        const message = falabellaManifestError(error);
+        const blocked = new Set(manifestCandidates.map((attempt) => attempt.candidate.id));
+        failed.push(...manifestCandidates.map((attempt) => ({
+          ...attempt,
+          error: message,
+        })));
+        successful = successful.filter((attempt) => !blocked.has(attempt.candidate.id));
+      }
+    }
 
     if (successful.length === 0) {
       for (const attempt of failed) {
@@ -137,9 +164,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const letterPdf = await composeLetterLabelPdf(
-      successful.flatMap((attempt) => attempt.documents),
+    const labelPdf = await composeFalabellaLabelsLetterGridPdf(
+      successful.flatMap((attempt) => attempt.prepared?.documents ?? []),
     );
+    const letterPdf = await composeLetterLabelPdf([labelPdf, ...manifestDocuments]);
     const status = failed.length > 0 ? 'partial' : 'completed';
     const client = await pool.connect();
     try {

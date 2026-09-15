@@ -3,6 +3,7 @@ import pool from '@/app/lib/db';
 import { MARKETPLACES } from '@/app/lib/constants/marketplaces';
 import {
   canMarkMercadoLibreShipmentReady,
+  fetchMercadoLibreShipmentSlaDeadline,
   fetchMercadoLibreShipmentSnapshot,
   getMercadoLibreLabelEligibility,
   markMercadoLibreShipmentReadyToShip,
@@ -15,7 +16,10 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 
 interface ShipmentRow {
   id: string;
+  id_order_header: string;
   external_shipment_id: string;
+  delivery_date: Date | string | null;
+  delivery_date_source: string | null;
 }
 
 function wait(milliseconds: number) {
@@ -39,6 +43,34 @@ async function saveSnapshot(id: string, snapshot: MercadoLibreShipmentSnapshot) 
   );
 }
 
+async function refreshSlaDeadline(
+  orderHeaderId: string,
+  externalShipmentId: string,
+): Promise<string | null> {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (attempt > 0) await wait(1_000);
+    let deadline: string | null = null;
+    try {
+      deadline = await fetchMercadoLibreShipmentSlaDeadline(externalShipmentId);
+    } catch (error) {
+      console.warn(
+        `[MercadoLibre][SLA] Intento ${attempt + 1} falló para ${externalShipmentId}:`,
+        error,
+      );
+    }
+    if (!deadline) continue;
+    await pool.query(
+      `UPDATE order_header
+       SET delivery_date = $1, delivery_date_source = 'sla', updated_at = NOW()
+       WHERE id = $2`,
+      [deadline, orderHeaderId],
+    );
+    return deadline;
+  }
+
+  return null;
+}
+
 export async function POST(
   _request: NextRequest,
   context: { params: Promise<{ id: string }> },
@@ -50,15 +82,18 @@ export async function POST(
 
   try {
     const result = await pool.query<ShipmentRow>(
-      `SELECT ms.id, ms.external_shipment_id
+      `SELECT ms.id, ms.id_order_header, ms.external_shipment_id,
+              oh.delivery_date, oh.delivery_date_source
        FROM marketplace_shipment ms
        JOIN order_header oh ON oh.id = ms.id_order_header
        WHERE ms.id = $1
          AND ms.marketplace = $2
          AND oh.marketplace = $2
          AND COALESCE(oh.status, 'pendiente') = 'pendiente'
-         AND oh.delivery_date IS NOT NULL
-         AND oh.delivery_date::date >= (NOW() AT TIME ZONE 'America/Santiago')::date`,
+         AND (
+           oh.delivery_date IS NULL
+           OR oh.delivery_date::date >= (NOW() AT TIME ZONE 'America/Santiago')::date
+         )`,
       [id, MARKETPLACES.MERCADO_LIBRE],
     );
     const shipment = result.rows[0];
@@ -73,9 +108,14 @@ export async function POST(
     await saveSnapshot(shipment.id, snapshot);
 
     if (getMercadoLibreLabelEligibility(snapshot).eligible) {
+      const deliveryDeadline = await refreshSlaDeadline(
+        shipment.id_order_header,
+        shipment.external_shipment_id,
+      );
       return NextResponse.json({
         success: true,
         readyToPrint: true,
+        deliveryDeadline,
         message: 'La etiqueta ya está disponible para imprimir.',
       });
     }
@@ -98,9 +138,13 @@ export async function POST(
     }
 
     const readyToPrint = getMercadoLibreLabelEligibility(snapshot).eligible;
+    const deliveryDeadline = readyToPrint
+      ? await refreshSlaDeadline(shipment.id_order_header, shipment.external_shipment_id)
+      : null;
     return NextResponse.json({
       success: true,
       readyToPrint,
+      deliveryDeadline,
       message: readyToPrint
         ? 'Mercado Libre generó la etiqueta. Ya puedes imprimirla.'
         : 'Mercado Libre recibió la confirmación y está generando la etiqueta.',

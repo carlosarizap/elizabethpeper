@@ -10,8 +10,9 @@ export interface DispatchShipment {
 export interface MercadoLibreDispatchOrder {
   id: string;
   orderId: string;
-  deliveryDate: string;
+  deliveryDate: string | null;
   deliveryDeadline: string | null;
+  deliveryDatePredicted: boolean;
   status: string;
   productSummary: string;
   totalUnits: number;

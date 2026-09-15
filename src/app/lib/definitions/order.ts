@@ -5,6 +5,7 @@ interface Order {
   status: string;
   product_title: string;
   product_quantity: number;
-  delivery_date: string;
+  delivery_date: string | null;
+  delivery_date_source?: 'sla' | 'predicted' | null;
   marketplace: string;
 }

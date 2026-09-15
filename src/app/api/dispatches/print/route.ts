@@ -3,9 +3,11 @@ import pool from '@/app/lib/db';
 import { MARKETPLACES } from '@/app/lib/constants/marketplaces';
 import type { DispatchPrintFailure, DispatchPrintResponse } from '@/app/lib/dispatches/definitions';
 import {
+  falabellaManifestError,
   falabellaPrintError,
   prepareFalabellaLabelAndConfirm,
 } from '@/app/lib/dispatches/falabella-print';
+import { createFalabellaForwardManifestPdfs } from '@/app/lib/falabella/seller-center-client';
 import { composeFalabellaLabelsLetterGridPdf } from '@/app/lib/falabella/shipping-label-layout';
 import {
   composeLetterLabelPdf,
@@ -51,6 +53,7 @@ interface Candidate {
   external_shipment_id: string | null;
   order_item_ids: string[] | null;
   product_summary: string | null;
+  has_completed_print: boolean;
 }
 
 interface MercadoLibreReady extends Candidate {
@@ -142,7 +145,13 @@ export async function POST(request: NextRequest) {
          ms.id AS shipment_id,
          ms.external_shipment_id,
          items.order_item_ids,
-         items.product_summary
+         items.product_summary,
+         EXISTS (
+           SELECT 1
+           FROM dispatch_batch_item printed
+           WHERE printed.id_order_header = oh.id
+             AND printed.status = 'completed'
+         ) AS has_completed_print
        FROM order_header oh
        LEFT JOIN LATERAL (
          SELECT shipment.id, shipment.external_shipment_id
@@ -175,8 +184,10 @@ export async function POST(request: NextRequest) {
        ) items ON true
        WHERE oh.id = ANY($6::uuid[])
          AND oh.marketplace IN ($1, $2, $3, $4, $5)
-         AND oh.delivery_date IS NOT NULL
-         AND oh.delivery_date::date >= (NOW() AT TIME ZONE 'America/Santiago')::date
+         AND (
+           oh.delivery_date::date >= (NOW() AT TIME ZONE 'America/Santiago')::date
+           OR (oh.marketplace = $1 AND oh.delivery_date IS NULL)
+         )
          AND (
            COALESCE(oh.status, 'pendiente') = 'pendiente'
            OR (
@@ -184,7 +195,7 @@ export async function POST(request: NextRequest) {
              AND LOWER(COALESCE(oh.status, '')) IN ('created', 'acknowledged')
            )
          )
-       ORDER BY oh.delivery_date::date, oh.marketplace, oh.order_id`,
+       ORDER BY oh.delivery_date::date NULLS FIRST, oh.marketplace, oh.order_id`,
       [
         MARKETPLACES.MERCADO_LIBRE,
         MARKETPLACES.FALABELLA,
@@ -266,29 +277,48 @@ export async function POST(request: NextRequest) {
       (candidate) => candidate.marketplace === MARKETPLACES.FALABELLA,
     );
     const falabellaDocuments: Uint8Array[] = [];
+    const falabellaManifestDocuments: Uint8Array[] = [];
     const falabellaAttempts = await mapWithConcurrency(falabellaCandidates, 4, async (candidate) => {
       try {
-        const documents = await prepareFalabellaLabelAndConfirm({
+        const prepared = await prepareFalabellaLabelAndConfirm({
           id: candidate.id,
           orderId: candidate.order_id,
           sellerCenterOrderId: candidate.order_id.split('-').at(-1) ?? candidate.order_id,
           orderItemIds: candidate.order_item_ids ?? [],
         });
-        return { candidate, documents, message: null as string | null };
+        return { candidate, prepared, message: null as string | null };
       } catch (error) {
-        return { candidate, documents: [] as Uint8Array[], message: falabellaPrintError(error) };
+        return { candidate, prepared: null, message: falabellaPrintError(error) };
       }
     });
+    const falabellaManifestCandidates = falabellaAttempts.filter(
+      (attempt) => !attempt.message && attempt.prepared && !attempt.candidate.has_completed_print,
+    );
+    const falabellaManifestBlocked = new Set<string>();
+    if (falabellaManifestCandidates.length > 0) {
+      try {
+        falabellaManifestDocuments.push(...await createFalabellaForwardManifestPdfs(
+          falabellaManifestCandidates.flatMap((attempt) => attempt.prepared?.orderItemIds ?? []),
+        ));
+      } catch (error) {
+        const message = falabellaManifestError(error);
+        for (const attempt of falabellaManifestCandidates) {
+          falabellaManifestBlocked.add(attempt.candidate.id);
+          failed.push({ candidate: attempt.candidate, message });
+        }
+      }
+    }
     for (const attempt of falabellaAttempts) {
       if (attempt.message) failed.push({ candidate: attempt.candidate, message: attempt.message });
-      else {
-        falabellaDocuments.push(...attempt.documents);
+      else if (attempt.prepared && !falabellaManifestBlocked.has(attempt.candidate.id)) {
+        falabellaDocuments.push(...attempt.prepared.documents);
         completed.push({ candidate: attempt.candidate, shipmentId: null });
       }
     }
     if (falabellaDocuments.length > 0) {
       sourceDocuments.push(await composeFalabellaLabelsLetterGridPdf(falabellaDocuments));
     }
+    sourceDocuments.push(...falabellaManifestDocuments);
 
     const parisCandidates = candidatesResult.rows.filter(
       (candidate) => candidate.marketplace === MARKETPLACES.PARIS,
@@ -304,7 +334,9 @@ export async function POST(request: NextRequest) {
       }
 
       if (parisAccessToken) {
-        const parisAttempts = await mapWithConcurrency(parisCandidates, 4, async (candidate) => {
+        // El gateway de París se vuelve inestable ante ráfagas grandes. Dos
+        // workers mantienen buen rendimiento sin golpear todos los labels a la vez.
+        const parisAttempts = await mapWithConcurrency(parisCandidates, 2, async (candidate) => {
           try {
             const documents = await downloadParisShippingLabelPdfs(
               candidate.order_id,

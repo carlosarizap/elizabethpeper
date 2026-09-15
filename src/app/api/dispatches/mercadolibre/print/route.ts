@@ -188,10 +188,12 @@ export async function POST(request: NextRequest) {
         AND ms.marketplace = $1
        WHERE oh.id = ANY($2::uuid[])
          AND oh.marketplace = $1
-         AND oh.delivery_date IS NOT NULL
-         AND oh.delivery_date::date >= (NOW() AT TIME ZONE 'America/Santiago')::date
+         AND (
+           oh.delivery_date IS NULL
+           OR oh.delivery_date::date >= (NOW() AT TIME ZONE 'America/Santiago')::date
+         )
          AND COALESCE(oh.status, 'pendiente') = 'pendiente'
-       ORDER BY oh.delivery_date::date, oh.order_id, ms.external_shipment_id`,
+       ORDER BY oh.delivery_date::date NULLS FIRST, oh.order_id, ms.external_shipment_id`,
       [MARKETPLACES.MERCADO_LIBRE, orderHeaderIds],
     );
 

@@ -3,6 +3,8 @@ import { drawProductSummaryBlock } from '../dispatches/product-summary-pdf.ts';
 import { composeLetterLabelPdf } from '../mercadolibre/shipping-label-utils.ts';
 
 const PARIS_API = 'https://api-developers.ecomm.cencosud.com';
+const PARIS_TRANSIENT_STATUSES = new Set([429, 502, 503, 504]);
+const PARIS_RETRY_DELAYS_MS = [500, 1_500, 3_000, 5_000, 8_000];
 
 const LETTER_WIDTH = 612;
 const LETTER_HEIGHT = 792;
@@ -48,17 +50,66 @@ function asArray<T>(value: T | T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : [value];
 }
 
+function retryAfterMs(response: Response, fallbackMs: number): number {
+  const value = response.headers.get('retry-after');
+  if (value === null) return fallbackMs + Math.floor(Math.random() * 250);
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, Math.min(seconds * 1_000, 15_000));
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, Math.min(date - Date.now(), 15_000)) : fallbackMs;
+}
+
+async function wait(ms: number): Promise<void> {
+  if (ms <= 0) return;
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * La pasarela de Cencosud puede responder temporalmente sin un servidor sano
+ * detrás del balanceador. Estos GET son seguros de repetir y se espacian para
+ * que una caída breve no obligue al usuario a reconstruir el lote manualmente.
+ */
+async function fetchParisWithRetry(
+  input: string | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= PARIS_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const response = await fetch(input, init);
+      if (!PARIS_TRANSIENT_STATUSES.has(response.status) || attempt === PARIS_RETRY_DELAYS_MS.length) {
+        return response;
+      }
+      await response.arrayBuffer().catch(() => null);
+      await wait(retryAfterMs(response, PARIS_RETRY_DELAYS_MS[attempt]));
+    } catch (error) {
+      lastError = error;
+      if (attempt === PARIS_RETRY_DELAYS_MS.length) throw error;
+      await wait(PARIS_RETRY_DELAYS_MS[attempt] + Math.floor(Math.random() * 250));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('París no respondió.');
+}
+
 async function parisApiRequest(path: string, accessToken: string): Promise<unknown> {
-  const response = await fetch(`${PARIS_API}${path}`, {
+  const response = await fetchParisWithRetry(`${PARIS_API}${path}`, {
     cache: 'no-store',
     headers: {
       Accept: 'application/json',
       Authorization: `Bearer ${accessToken}`,
     },
   });
-  const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+  const rawBody = await response.text();
+  let payload: Record<string, unknown> | null = null;
+  try {
+    payload = JSON.parse(rawBody) as Record<string, unknown>;
+  } catch {
+    // El gateway a veces devuelve texto plano en errores transitorios.
+  }
   if (!response.ok) {
-    const message = cleanString(payload?.message) ?? cleanString(payload?.error);
+    const message = cleanString(payload?.message)
+      ?? cleanString(payload?.error)
+      ?? cleanString(rawBody)?.slice(0, 220);
     throw new Error(`París respondió ${response.status}${message ? `: ${message}` : ''}`);
   }
   return payload;
@@ -91,7 +142,7 @@ async function requestLabelUrls(
 async function downloadPdf(url: string): Promise<Uint8Array> {
   const parsed = new URL(url);
   if (parsed.protocol !== 'https:') throw new Error('París devolvió una URL de etiqueta no segura.');
-  const response = await fetch(parsed, { cache: 'no-store' });
+  const response = await fetchParisWithRetry(parsed, { cache: 'no-store' });
   if (!response.ok) throw new Error(`No fue posible descargar la etiqueta París (${response.status}).`);
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (bytes.length < 4 || new TextDecoder('ascii').decode(bytes.slice(0, 4)) !== '%PDF') {
@@ -116,9 +167,10 @@ export async function downloadParisShippingLabelPdfs(
 
   const multitracking = shipments.length > 1
     || shipments.some((shipment) => Number(shipment.nPackages ?? 1) > 1);
-  const urlGroups = await Promise.all(
-    labelIds.map((labelId) => requestLabelUrls(labelId, multitracking, accessToken)),
-  );
+  const urlGroups: string[][] = [];
+  for (const labelId of labelIds) {
+    urlGroups.push(await requestLabelUrls(labelId, multitracking, accessToken));
+  }
   const urls = [...new Set(urlGroups.flat())];
   return Promise.all(urls.map(downloadPdf));
 }

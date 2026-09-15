@@ -67,6 +67,41 @@ test('París usa la ruta multitracking cuando el envío tiene varios paquetes', 
   }
 });
 
+test('París reintenta automáticamente un 503 temporal del balanceador', async () => {
+  const originalFetch = globalThis.fetch;
+  let shipmentAttempts = 0;
+
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith('/v2/shipments/3136482280')) {
+      shipmentAttempts += 1;
+      if (shipmentAttempts < 3) {
+        return Response.json(
+          { message: 'failure to get a peer from the ring-balancer' },
+          { status: 503, headers: { 'retry-after': '0' } },
+        );
+      }
+      return Response.json([{ labelId: 'RETRY123', nPackages: 1 }]);
+    }
+    if (url.endsWith('/v1/sub-orders/RETRY123/print-label')) {
+      return Response.json({ data: [{ labels: 'https://labels.example/retry.pdf' }] });
+    }
+    if (url === 'https://labels.example/retry.pdf') {
+      return new Response(PDF_BYTES, { status: 200, headers: { 'content-type': 'application/pdf' } });
+    }
+    return new Response(null, { status: 404 });
+  };
+
+  try {
+    const documents = await downloadParisShippingLabelPdfs('3136482280', 'derived-token');
+
+    assert.equal(shipmentAttempts, 3);
+    assert.equal(documents.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('París compone cuatro etiquetas en una sola hoja carta', async () => {
   const documents: Uint8Array[] = [];
   for (let index = 0; index < 4; index += 1) {

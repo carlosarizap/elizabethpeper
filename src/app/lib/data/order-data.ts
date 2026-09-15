@@ -59,6 +59,7 @@ export async function fetchOrders(page: number = 1, query: string = '') {
         oh.billing_city,
         oh.marketplace,
         oh.delivery_date,
+        oh.delivery_date_source,
         oh.created_at AS header_created_at,
         oh.updated_at AS header_updated_at,
         od.id AS detail_id,
@@ -78,12 +79,34 @@ export async function fetchOrders(page: number = 1, query: string = '') {
         (od.product_title ILIKE $1 OR
          oh.status ILIKE $1 OR
          oh.order_id::TEXT ILIKE $1) AND
-        oh.delivery_date::date >= (
-          CASE 
-            WHEN CURRENT_TIME >= TIME '18:00'
-            THEN CURRENT_DATE + 1
-            ELSE CURRENT_DATE
-          END
+        (
+          oh.delivery_date::date >= (
+            CASE
+              WHEN CURRENT_TIME >= TIME '18:00'
+              THEN CURRENT_DATE + 1
+              ELSE CURRENT_DATE
+            END
+          )
+          OR (
+            oh.marketplace = 'mercado_libre'
+            AND oh.delivery_date IS NULL
+            AND COALESCE(oh.status, 'pendiente') = 'pendiente'
+            AND EXISTS (
+              SELECT 1
+              FROM marketplace_shipment visible_shipment
+              WHERE visible_shipment.id_order_header = oh.id
+                AND visible_shipment.marketplace = 'mercado_libre'
+                AND visible_shipment.shipping_mode = 'me2'
+                AND visible_shipment.logistic_type IN (
+                  'drop_off', 'xd_drop_off', 'cross_docking', 'self_service'
+                )
+                AND (
+                  (visible_shipment.status = 'pending' AND visible_shipment.substatus = 'manufacturing')
+                  OR (visible_shipment.status = 'handling' AND visible_shipment.substatus = 'waiting_for_label_generation')
+                  OR (visible_shipment.status = 'ready_to_ship' AND visible_shipment.substatus IN ('ready_to_print', 'printed'))
+                )
+            )
+          )
         )
       ORDER BY 
         CASE 
@@ -94,7 +117,7 @@ export async function fetchOrders(page: number = 1, query: string = '') {
           WHEN oh.marketplace = 'walmart' THEN 5
           ELSE 6
         END,
-        oh.delivery_date ASC
+        oh.delivery_date ASC NULLS FIRST
       LIMIT $2 OFFSET $3`,
       [`%${query}%`, ITEMS_PER_PAGE, offset]
     );
@@ -132,6 +155,7 @@ export async function fetchOrders(page: number = 1, query: string = '') {
           company_rut: row.company_rut,
           billing_city: row.billing_city,
           delivery_date: row.delivery_date,
+          delivery_date_source: row.delivery_date_source,
           created_at: row.header_created_at,
           updated_at: row.header_updated_at,
           details: [],
@@ -191,7 +215,8 @@ export async function fetchOrderById(id: string) {
         od.marketplace_status,
         od.status_updated_at,
         oh.marketplace,
-        oh.delivery_date
+        oh.delivery_date,
+        oh.delivery_date_source
       FROM order_header oh
       JOIN order_detail od ON oh.id = od.id_order_header
       WHERE oh.id = $1`,
@@ -304,6 +329,7 @@ export async function fetchAllOrders(
         oh.billing_city,
         oh.marketplace,
         oh.delivery_date,
+        oh.delivery_date_source,
         oh.created_at AS header_created_at,
         oh.updated_at AS header_updated_at,
         od.id AS detail_id,
@@ -347,6 +373,7 @@ export async function fetchAllOrders(
           company_rut: row.company_rut,
           billing_city: row.billing_city,
           delivery_date: row.delivery_date,
+          delivery_date_source: row.delivery_date_source,
           created_at: row.header_created_at,
           updated_at: row.header_updated_at,
           details: [],

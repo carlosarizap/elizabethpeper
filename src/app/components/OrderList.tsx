@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { Marketplace } from "../lib/constants/marketplaces";
-import { ArrowPathIcon } from "@heroicons/react/24/solid";
+import { ArrowPathIcon, ClockIcon } from "@heroicons/react/24/solid";
 import { OrderHeader } from "../lib/definitions/order_header";
 import LoadingSpinner from "../components/LoadingSpinner";
 import OrderStatusBadge from "../components/OrderStatusBadge";
@@ -220,10 +220,17 @@ const OrderList = () => {
                         className="px-2 py-1 print:py-0.5"
                         rowSpan={orderHeader.details.length}
                       >
-                        {new Date(orderHeader.delivery_date).toLocaleDateString("es-CL", {
-                          weekday: "long",
-                          day: "numeric"
-                        })}
+                        <span className="inline-flex items-center justify-center gap-1">
+                          {orderHeader.delivery_date_source === 'predicted'
+                            ? <ClockIcon className="h-3.5 w-3.5 text-amber-600" aria-label="Fecha estimada" />
+                            : null}
+                          {orderHeader.delivery_date
+                            ? new Date(orderHeader.delivery_date).toLocaleDateString("es-CL", {
+                                weekday: "long",
+                                day: "numeric"
+                              })
+                            : "Por confirmar"}
+                        </span>
                       </td>
 
                       <td

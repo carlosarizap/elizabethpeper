@@ -34,8 +34,9 @@ interface UnifiedOrder {
   id: string;
   marketplace: SupportedMarketplace;
   orderId: string;
-  deliveryDate: string;
+  deliveryDate: string | null;
   deliveryDeadline: string | null;
+  deliveryDatePredicted: boolean;
   productSummary: string;
   totalUnits: number;
   printCount: number;
@@ -88,7 +89,8 @@ function addDays(dateKey: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-function dateHeading(dateKey: string): string {
+function dateHeading(dateKey: string | null): string {
+  if (!dateKey) return 'Mercado Libre · fecha de despacho por confirmar';
   const today = chileDateKey();
   const prefix = dateKey === today ? 'Hoy' : dateKey === addDays(today, 1) ? 'Mañana' : null;
   const formatted = new Intl.DateTimeFormat('es-CL', {
@@ -129,6 +131,7 @@ function mergeOrders(
       orderId: order.orderId,
       deliveryDate: order.deliveryDate,
       deliveryDeadline: order.deliveryDeadline,
+      deliveryDatePredicted: order.deliveryDatePredicted,
       productSummary: order.productSummary,
       totalUnits: order.totalUnits,
       printCount: order.printCount,
@@ -145,6 +148,7 @@ function mergeOrders(
       orderId: order.orderId,
       deliveryDate: order.deliveryDate,
       deliveryDeadline: null,
+      deliveryDatePredicted: false,
       productSummary: order.productSummary,
       totalUnits: order.totalUnits,
       printCount: order.printCount,
@@ -162,6 +166,7 @@ function mergeOrders(
       orderId: order.orderId,
       deliveryDate: order.deliveryDate,
       deliveryDeadline: null,
+      deliveryDatePredicted: false,
       productSummary: order.productSummary,
       totalUnits: order.totalUnits,
       printCount: order.printCount,
@@ -179,6 +184,7 @@ function mergeOrders(
       orderId: order.orderId,
       deliveryDate: order.deliveryDate,
       deliveryDeadline: null,
+      deliveryDatePredicted: false,
       productSummary: order.productSummary,
       totalUnits: order.totalUnits,
       printCount: order.printCount,
@@ -196,6 +202,7 @@ function mergeOrders(
       orderId: order.orderId,
       deliveryDate: order.deliveryDate,
       deliveryDeadline: null,
+      deliveryDatePredicted: false,
       productSummary: order.productSummary,
       totalUnits: order.totalUnits,
       printCount: order.printCount,
@@ -208,7 +215,9 @@ function mergeOrders(
     })),
   ];
   return merged.sort((left, right) => (
-    left.deliveryDate.localeCompare(right.deliveryDate)
+    left.deliveryDate === null && right.deliveryDate !== null ? -1
+      : left.deliveryDate !== null && right.deliveryDate === null ? 1
+      : (left.deliveryDate ?? '').localeCompare(right.deliveryDate ?? '')
     || left.marketplace.localeCompare(right.marketplace)
     || left.orderId.localeCompare(right.orderId)
   ));
@@ -326,7 +335,7 @@ export default function DispatchCenter() {
   );
 
   const groups = useMemo(() => {
-    const grouped = new Map<string, UnifiedOrder[]>();
+    const grouped = new Map<string | null, UnifiedOrder[]>();
     for (const order of visibleOrders) {
       const current = grouped.get(order.deliveryDate) ?? [];
       current.push(order);
@@ -551,7 +560,7 @@ export default function DispatchCenter() {
               const selectable = groupOrders.filter((order) => order.selectable);
               const allChecked = selectable.length > 0 && selectable.every((order) => selection.has(order.key));
               return (
-                <div key={date}>
+                <div key={date ?? 'mercado-libre-unconfirmed'}>
                   <div className="flex items-center justify-between bg-slate-50 px-3 py-2 sm:px-4">
                     <label className="flex items-center gap-3 font-semibold capitalize text-slate-800"><input type="checkbox" checked={allChecked} disabled={selectable.length === 0} onChange={(event) => setGroupSelection(groupOrders, event.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />{dateHeading(date)}</label>
                     <span className="text-xs font-medium text-slate-500">{groupOrders.length} envío(s)</span>
@@ -569,9 +578,14 @@ export default function DispatchCenter() {
                           <div><p className="font-semibold text-slate-900">{order.orderId}</p>{order.mercadoLibre?.shipment ? <p className="mt-1 text-xs text-slate-500">Envío {order.mercadoLibre.shipment.externalShipmentId}</p> : null}</div>
                           <div><p className="text-sm text-slate-700">{order.productSummary}</p><p className="mt-1 text-xs text-slate-500">{order.totalUnits} unidad(es)</p></div>
                           <div>
-                            <p className="text-sm font-medium capitalize text-slate-700">{new Intl.DateTimeFormat('es-CL', { day: '2-digit', month: 'short', timeZone: 'UTC' }).format(new Date(`${order.deliveryDate}T12:00:00Z`))}</p>
+                            {order.deliveryDate
+                              ? <p className="text-sm font-medium capitalize text-slate-700">{new Intl.DateTimeFormat('es-CL', { day: '2-digit', month: 'short', timeZone: 'UTC' }).format(new Date(`${order.deliveryDate}T12:00:00Z`))}</p>
+                              : <p className="text-sm font-semibold text-amber-700">Por confirmar</p>}
                             {order.marketplace === 'mercado_libre' && deadlineTimeLabel(order.deliveryDeadline)
-                              ? <p className="mt-1 text-xs text-slate-500">Hasta las {deadlineTimeLabel(order.deliveryDeadline)} hrs</p>
+                              ? <p className={`mt-1 inline-flex items-center gap-1 text-xs ${order.deliveryDatePredicted ? 'font-medium text-amber-700' : 'text-slate-500'}`}>
+                                  {order.deliveryDatePredicted ? <ClockIcon className="h-3.5 w-3.5" aria-hidden="true" /> : null}
+                                  {order.deliveryDatePredicted ? 'Estimada' : 'Hasta las'} {deadlineTimeLabel(order.deliveryDeadline)} hrs
+                                </p>
                               : null}
                           </div>
                           <div className="lg:text-right">

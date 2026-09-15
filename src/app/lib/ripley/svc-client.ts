@@ -8,6 +8,7 @@ const DEFAULT_USERNAME = 'seller_elipeper';
 const REQUEST_TIMEOUT_MS = 30_000;
 const TOKEN_FALLBACK_TTL_MS = 10 * 60_000;
 const TOKEN_EXPIRY_MARGIN_MS = 60_000;
+const ORDER_PAGE_SIZE = 25;
 
 interface RipleySvcConfig {
   baseUrl: string;
@@ -25,6 +26,7 @@ interface RipleyAuthResponse {
 interface RipleyFastManagementOrder {
   _id?: unknown;
   order_id?: unknown;
+  _status_management?: unknown;
 }
 
 interface RipleyOrderListResponse {
@@ -40,6 +42,7 @@ interface RipleyOrderListResponse {
 interface RipleyLabelFailurePayload {
   order_id?: unknown;
   status?: unknown;
+  message?: unknown;
 }
 
 export interface RipleyLabelFailure {
@@ -86,6 +89,13 @@ function splitApiKey(value: string): { username: string; password: string } | nu
 
 export function createRipleySvcBasicAuthorization(username: string, password: string): string {
   return `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
+}
+
+export function createRipleyOrderListQuery(pageNumber: number): string {
+  return new URLSearchParams({
+    limit: String(ORDER_PAGE_SIZE),
+    page: String(pageNumber),
+  }).toString();
 }
 
 function readConfig(): RipleySvcConfig {
@@ -241,19 +251,18 @@ async function findOrderDocuments(
 ): Promise<Map<string, string>> {
   const wanted = new Set(orderIds);
   const documents = new Map<string, string>();
-  const limit = 200;
+  // SVC rejects `offset` and limits greater than 25. It exposes pagination
+  // through a one-based `page` parameter, even though the response reports an
+  // offset. Filters such as status_management are also rejected, so we filter
+  // the returned orders locally.
+  const limit = ORDER_PAGE_SIZE;
+  const maxPages = 160;
 
-  for (let offset = 0; offset < 4_000 && documents.size < wanted.size; offset += limit) {
-    const query = new URLSearchParams({
-      status_management: 'TO_PREPARE',
-      is_fast_management: 'true',
-      project: '_id,order_id,_status_management,_created_on',
-      limit: String(limit),
-      offset: String(offset),
-    });
+  for (let pageNumber = 1; pageNumber <= maxPages && documents.size < wanted.size; pageNumber += 1) {
+    const query = createRipleyOrderListQuery(pageNumber);
     const response = await authenticatedFetch(
       config,
-      `${FAST_MANAGEMENT_ORDERS_PATH}?${query.toString()}`,
+      `${FAST_MANAGEMENT_ORDERS_PATH}?${query}`,
     );
     const payload = await readResponsePayload(response) as RipleyOrderListResponse | null;
     if (!response.ok || !payload || typeof payload !== 'object') {
@@ -265,12 +274,15 @@ async function findOrderDocuments(
 
     const page = normalizeOrderList(payload);
     for (const order of page.orders) {
+      if (order._status_management !== 'TO_PREPARE') continue;
       const orderId = typeof order.order_id === 'string' ? order.order_id : '';
       const documentId = typeof order._id === 'string' ? order._id : '';
       if (wanted.has(orderId) && documentId) documents.set(orderId, documentId);
     }
 
-    if (page.orders.length === 0 || offset + page.orders.length >= page.total) break;
+    // Ripley can report a stale total (for example 500 while only 30 orders are
+    // available), so the short page is the reliable end-of-results signal.
+    if (page.orders.length < limit) break;
   }
 
   return documents;
@@ -287,15 +299,21 @@ export function parseRipleyLabelDownloadResponse(
   const response = payload as {
     labels_generated?: unknown;
     orders_without_labels?: unknown;
+    orders_with_error?: unknown;
   };
-  const failures: RipleyLabelFailure[] = Array.isArray(response.orders_without_labels)
-    ? response.orders_without_labels.map((item: RipleyLabelFailurePayload) => ({
+  const rawFailures = [
+    ...(Array.isArray(response.orders_without_labels) ? response.orders_without_labels : []),
+    ...(Array.isArray(response.orders_with_error) ? response.orders_with_error : []),
+  ] as RipleyLabelFailurePayload[];
+  const failures: RipleyLabelFailure[] = rawFailures
+    .map((item) => ({
       orderId: typeof item?.order_id === 'string' ? item.order_id : 'desconocida',
       message: typeof item?.status === 'string' && item.status.trim()
         ? item.status.trim()
+        : typeof item?.message === 'string' && item.message.trim()
+          ? item.message.trim()
         : 'Ripley no generó la etiqueta.',
-    }))
-    : [];
+    }));
   const failedIds = new Set(failures.map((item) => item.orderId));
   const encoded = typeof response.labels_generated === 'string'
     ? response.labels_generated.replace(/^data:application\/pdf;base64,/i, '').trim()

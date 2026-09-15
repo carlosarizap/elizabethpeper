@@ -7,6 +7,7 @@ import { getValidAccessToken } from '@/app/lib/mercadolibre/token-manager';
 import {
   extractReturnShippingStatuses,
   getMercadoLibreInvoiceData,
+  getMercadoLibreDeliveryDateSource,
   getMercadoLibreMarketplaceItemId,
   inferMercadoLibreDocumentType,
   isCertainFullLineReturn,
@@ -525,7 +526,10 @@ export async function GET(request: NextRequest) {
         shipment: MercadoLibreShipment;
         externalOrderId: string;
       }>();
-      const deliveryDates: string[] = [];
+      const deliveryDates: Array<{
+        date: string;
+        source: 'sla' | 'predicted';
+      }> = [];
       const fallbackShippingAmounts: number[] = [];
       const invoicePayloads: unknown[] = [];
       let packReturnsChecked = true;
@@ -553,8 +557,20 @@ export async function GET(request: NextRequest) {
         const deliveryDate = resolveMercadoLibreDispatchDeadline({
           slaExpectedDate,
           preparationDeadline: shipment?.lead_time?.estimated_schedule_limit?.date,
+          buyerDeliveryDate: shipment?.lead_time?.estimated_delivery_time?.date
+            ?? shipment?.shipping_option?.estimated_delivery_time?.date
+            ?? shipment?.estimated_delivery_time?.date,
         });
-        if (deliveryDate) deliveryDates.push(deliveryDate);
+        const deliveryDateSource = getMercadoLibreDeliveryDateSource({
+          slaExpectedDate,
+          preparationDeadline: shipment?.lead_time?.estimated_schedule_limit?.date,
+          buyerDeliveryDate: shipment?.lead_time?.estimated_delivery_time?.date
+            ?? shipment?.shipping_option?.estimated_delivery_time?.date
+            ?? shipment?.estimated_delivery_time?.date,
+        });
+        if (deliveryDate && deliveryDateSource) {
+          deliveryDates.push({ date: deliveryDate, source: deliveryDateSource });
+        }
         fallbackShippingAmounts.push(numericValue(order.shipping_cost));
 
         const billingInfoId = stringValue(order.buyer?.billing_info?.id);
@@ -616,12 +632,16 @@ export async function GET(request: NextRequest) {
         billingCity: normalizedInvoiceData.find((data) => data.billingCity)?.billingCity ?? null,
       };
 
+      const earliestDelivery = deliveryDates.sort((left, right) => (
+        left.date.localeCompare(right.date)
+      ))[0] ?? null;
       const result = await upsertMercadoLibreOrder({
         orderId: headerOrderId,
         shippingAmount,
         status: aggregateMercadoLibreOrderStatuses(orderStatuses),
         documentType,
-        deliveryDate: deliveryDates.sort()[0] ?? null,
+        deliveryDate: earliestDelivery?.date ?? null,
+        deliveryDateSource: earliestDelivery?.source ?? null,
         companyRut: invoiceData.companyRut,
         billingCity: invoiceData.billingCity,
         shipments: Array.from(uniqueShipments, ([externalShipmentId, entry]) => ({

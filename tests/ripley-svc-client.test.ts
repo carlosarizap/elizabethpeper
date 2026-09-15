@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  createRipleyOrderListQuery,
   createRipleySvcBasicAuthorization,
   parseRipleyLabelDownloadResponse,
   RipleySvcError,
@@ -15,6 +16,15 @@ test('builds the SVC Basic credential from seller username and password', () => 
     Buffer.from(authorization.replace(/^Basic /, ''), 'base64').toString('utf8'),
     'seller_elipeper:secret',
   );
+});
+
+test('uses the page pagination accepted by the Ripley order list', () => {
+  const query = new URLSearchParams(createRipleyOrderListQuery(3));
+
+  assert.equal(query.get('limit'), '25');
+  assert.equal(query.get('page'), '3');
+  assert.equal(query.has('offset'), false);
+  assert.equal(query.has('status_management'), false);
 });
 
 test('parses a successful Ripley SVC label response', () => {
@@ -41,6 +51,23 @@ test('keeps per-order failures while accepting the generated PDF', () => {
   assert.deepEqual(result.failures, [{
     orderId: '101-A',
     message: 'Etiqueta todavía no disponible',
+  }]);
+});
+
+test('includes the orders_with_error failures returned by Ripley', () => {
+  const result = parseRipleyLabelDownloadResponse(
+    {
+      labels_generated: PDF_BASE64,
+      orders_without_labels: [],
+      orders_with_error: [{ order_id: '101-A', message: 'Orden no preparable' }],
+    },
+    ['100-A', '101-A'],
+  );
+
+  assert.deepEqual(result.completedOrderIds, ['100-A']);
+  assert.deepEqual(result.failures, [{
+    orderId: '101-A',
+    message: 'Orden no preparable',
   }]);
 });
 

@@ -6,6 +6,7 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   BuildingOffice2Icon,
+  ClockIcon,
   DocumentArrowDownIcon,
   ReceiptPercentIcon,
 } from '@heroicons/react/24/solid';
@@ -77,7 +78,8 @@ function DocumentTypeBadge({ type }: { type: OrderHeader['document_type'] }) {
   );
 }
 
-function formatDate(value: string) {
+function formatDate(value: string | null) {
+  if (!value) return 'Por confirmar';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'Sin fecha';
 
@@ -91,8 +93,13 @@ function formatDate(value: string) {
 export default function OrderTable({ orders }: Props) {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const sortedOrders = [...orders].sort((left, right) => {
-    const leftDate = new Date(left.delivery_date).getTime();
-    const rightDate = new Date(right.delivery_date).getTime();
+    const leftDeliveryDate = left.delivery_date;
+    const rightDeliveryDate = right.delivery_date;
+    if (!leftDeliveryDate && rightDeliveryDate) return -1;
+    if (leftDeliveryDate && !rightDeliveryDate) return 1;
+    if (!leftDeliveryDate || !rightDeliveryDate) return 0;
+    const leftDate = new Date(leftDeliveryDate).getTime();
+    const rightDate = new Date(rightDeliveryDate).getTime();
     return sortOrder === 'asc' ? leftDate - rightDate : rightDate - leftDate;
   });
 
@@ -155,7 +162,15 @@ export default function OrderTable({ orders }: Props) {
                     {formatDate(order.created_at)}
                   </td>
                   <td className="px-4 py-4 text-sm text-slate-600">
-                    {formatDate(order.delivery_date)}
+                    <div className="inline-flex items-center gap-1.5">
+                      {order.delivery_date_source === 'predicted'
+                        ? <ClockIcon className="h-4 w-4 text-amber-600" aria-label="Fecha estimada" />
+                        : null}
+                      <span>{formatDate(order.delivery_date)}</span>
+                      {order.delivery_date_source === 'predicted'
+                        ? <span className="text-xs font-medium text-amber-700">Estimada</span>
+                        : null}
+                    </div>
                   </td>
                   <td className="px-4 py-4 text-center">
                     <div className="flex min-w-[150px] flex-col items-center gap-2">

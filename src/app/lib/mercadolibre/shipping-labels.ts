@@ -1,5 +1,8 @@
 import { getValidAccessToken } from './token-manager';
-import type { MercadoLibreLabelSnapshot } from './shipping-label-utils';
+import {
+  getMercadoLibreSlaDeadline,
+  type MercadoLibreLabelSnapshot,
+} from './shipping-label-utils';
 
 export {
   canMarkMercadoLibreShipmentReady,
@@ -73,6 +76,29 @@ export async function fetchMercadoLibreShipmentSnapshot(
     logisticType: cleanString(payload.logistic_type) ?? cleanString(logistic?.type),
     trackingNumber: cleanString(payload.tracking_number),
   };
+}
+
+export async function fetchMercadoLibreShipmentSlaDeadline(
+  shipmentId: string,
+  accessToken?: string,
+): Promise<string | null> {
+  const token = accessToken ?? await getValidAccessToken();
+  const response = await fetch(
+    `${MERCADO_LIBRE_API}/shipments/${encodeURIComponent(shipmentId)}/sla`,
+    {
+      cache: 'no-store',
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  // Mientras el envío está en manufacturing, Mercado Libre aún no publica SLA.
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(
+      `Mercado Libre respondió ${response.status}${body ? `: ${body.slice(0, 300)}` : ''}`,
+    );
+  }
+  return getMercadoLibreSlaDeadline(await response.json());
 }
 
 export async function downloadMercadoLibreLabelPdf(

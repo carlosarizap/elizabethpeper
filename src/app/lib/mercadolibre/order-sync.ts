@@ -12,8 +12,16 @@ export interface MercadoLibreInvoiceData {
 
 export interface MercadoLibreDispatchDeadlineInput {
   slaExpectedDate?: unknown;
+  /** Límite de preparación; se conserva para distinguirlo, pero no es un SLA. */
   preparationDeadline?: unknown;
+  /** Fecha prometida al comprador; permite estimar el despacho cuando aún no hay SLA. */
+  buyerDeliveryDate?: unknown;
 }
+
+export type MercadoLibreDeliveryDateSource = 'sla' | 'predicted';
+
+const SANTIAGO_TIME_ZONE = 'America/Santiago';
+const PREDICTED_CUTOFF_HOUR = 16;
 
 function asRecord(value: unknown): UnknownRecord | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -31,8 +39,86 @@ function scalarString(value: unknown): string | null {
 export function resolveMercadoLibreDispatchDeadline(
   input: MercadoLibreDispatchDeadlineInput,
 ): string | null {
+  // /shipments/{id}/sla siempre tiene prioridad. Mientras Mercado Libre todavía
+  // no lo publica, la fecha se estima y se marca explícitamente como predictiva.
   return scalarString(input.slaExpectedDate)
-    ?? scalarString(input.preparationDeadline);
+    ?? predictMercadoLibreDispatchDeadline(input);
+}
+
+function dateKey(value: unknown): string | null {
+  const raw = scalarString(value);
+  const match = raw?.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match?.[1] ?? null;
+}
+
+function shiftDate(date: string, days: number): string {
+  const parsed = new Date(`${date}T12:00:00Z`);
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function isWeekend(date: string): boolean {
+  const day = new Date(`${date}T12:00:00Z`).getUTCDay();
+  return day === 0 || day === 6;
+}
+
+function previousBusinessDay(date: string): string {
+  let candidate = shiftDate(date, -1);
+  while (isWeekend(candidate)) candidate = shiftDate(candidate, -1);
+  return candidate;
+}
+
+function nextBusinessDay(date: string): string {
+  let candidate = shiftDate(date, 1);
+  while (isWeekend(candidate)) candidate = shiftDate(candidate, 1);
+  return candidate;
+}
+
+function santiagoOffset(date: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: SANTIAGO_TIME_ZONE,
+    timeZoneName: 'longOffset',
+  }).formatToParts(new Date(`${date}T16:00:00Z`));
+  const offset = parts.find((part) => part.type === 'timeZoneName')?.value;
+  const match = offset?.match(/^GMT([+-]\d{2}:\d{2})$/);
+  return match?.[1] ?? '-03:00';
+}
+
+export function predictMercadoLibreDispatchDeadline(
+  input: Pick<MercadoLibreDispatchDeadlineInput, 'preparationDeadline' | 'buyerDeliveryDate'>,
+): string | null {
+  const preparationDate = dateKey(input.preparationDeadline);
+  const buyerDeliveryDate = dateKey(input.buyerDeliveryDate);
+
+  let predictedDate = buyerDeliveryDate
+    ? previousBusinessDay(buyerDeliveryDate)
+    : preparationDate
+      ? nextBusinessDay(preparationDate)
+      : null;
+
+  // Nunca anticipamos el despacho a una fecha anterior al límite que ML le dio
+  // al vendedor para confirmar la disponibilidad del producto.
+  if (predictedDate && preparationDate && predictedDate < preparationDate) {
+    predictedDate = nextBusinessDay(preparationDate);
+  }
+  if (!predictedDate) return null;
+
+  return `${predictedDate}T${String(PREDICTED_CUTOFF_HOUR).padStart(2, '0')}:00:00${santiagoOffset(predictedDate)}`;
+}
+
+export function getMercadoLibreDeliveryDateSource(
+  input: MercadoLibreDispatchDeadlineInput,
+): MercadoLibreDeliveryDateSource | null {
+  if (scalarString(input.slaExpectedDate)) return 'sla';
+  return predictMercadoLibreDispatchDeadline(input) ? 'predicted' : null;
+}
+
+export function isMercadoLibreFulfillmentShipment(
+  shipments: readonly { logisticType?: unknown }[] | null | undefined,
+): boolean {
+  return Boolean(
+    shipments?.some((shipment) => scalarString(shipment.logisticType)?.toLowerCase() === 'fulfillment'),
+  );
 }
 
 function getBillingInfoRoot(payload: unknown): UnknownRecord | null {

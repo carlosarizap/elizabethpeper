@@ -4,6 +4,7 @@ import { PDFDocument } from 'pdf-lib';
 import {
   canMarkMercadoLibreShipmentReady,
   composeLetterLabelPdf,
+  getMercadoLibreSlaDeadline,
   getMercadoLibreLabelEligibility,
   isMercadoLibreShipmentWaitingForLabel,
 } from '../src/app/lib/mercadolibre/shipping-label-utils.ts';
@@ -18,6 +19,14 @@ test('habilita etiquetas listas de Mercado Envíos 2', () => {
     }),
     { eligible: true, reason: null },
   );
+});
+
+test('extrae únicamente la fecha comprometida del SLA', () => {
+  assert.equal(
+    getMercadoLibreSlaDeadline({ expected_date: '2026-09-15T16:00:00-03:00' }),
+    '2026-09-15T16:00:00-03:00',
+  );
+  assert.equal(getMercadoLibreSlaDeadline({ code: 'not_found' }), null);
 });
 
 test('mantiene disponible una etiqueta ya impresa para reimpresión', () => {

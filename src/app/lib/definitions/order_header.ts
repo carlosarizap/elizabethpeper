@@ -20,7 +20,8 @@ export interface OrderHeader {
     return_updated_at: string | null;
     company_rut: string | null;
     billing_city: string | null;
-    delivery_date: string;
+    delivery_date: string | null;
+    delivery_date_source: 'sla' | 'predicted' | null;
     created_at: string;
     updated_at: string;
     details: OrderDetail[]; // ⚡ agregamos los detalles aquí

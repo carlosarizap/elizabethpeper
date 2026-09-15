@@ -12,6 +12,11 @@ export interface FalabellaPrintCandidate {
   orderItemIds: string[];
 }
 
+export interface FalabellaPreparedLabel {
+  documents: Uint8Array[];
+  orderItemIds: string[];
+}
+
 export function falabellaPrintError(error: unknown): string {
   const message = error instanceof Error ? error.message : '';
   if (/E034|E119|not yet ready|must be packed|todav.a no habilita/i.test(message)) {
@@ -28,13 +33,25 @@ export function falabellaPrintError(error: unknown): string {
   return 'No fue posible obtener y confirmar la etiqueta en Falabella.';
 }
 
+export function falabellaManifestError(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  if (/E087|Manifest feature is not enabled/i.test(message)) {
+    return 'Falabella no tiene habilitada la creación de manifiestos para esta cuenta.';
+  }
+  const apiMessage = message.match(/E\d{3}:[^\n]{1,240}/i)?.[0];
+  if (apiMessage) return `Falabella rechazó el manifiesto: ${apiMessage}`;
+  return message
+    ? `No fue posible crear el manifiesto Falabella: ${message.slice(0, 260)}`
+    : 'No fue posible crear el manifiesto Falabella.';
+}
+
 /**
  * Obtiene la etiqueta antes de cambiar el estado remoto. La orden solo se
  * considera preparada cuando Falabella también la deja en ready_to_ship.
  */
 export async function prepareFalabellaLabelAndConfirm(
   candidate: FalabellaPrintCandidate,
-): Promise<Uint8Array[]> {
+): Promise<FalabellaPreparedLabel> {
   const documents = await downloadFalabellaShippingParcelPdfs(candidate.orderItemIds);
   const items = await fetchFalabellaOrderItems(candidate.sellerCenterOrderId);
 
@@ -71,5 +88,8 @@ export async function prepareFalabellaLabelAndConfirm(
     [candidate.id, items.map((item) => item.orderItemId)],
   );
 
-  return documents;
+  return {
+    documents,
+    orderItemIds: items.map((item) => item.orderItemId),
+  };
 }

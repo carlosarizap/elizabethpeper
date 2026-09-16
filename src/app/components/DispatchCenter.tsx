@@ -24,6 +24,7 @@ import type {
   WalmartDispatchOrder,
   WalmartDispatchResponse,
 } from '@/app/lib/dispatches/definitions';
+import { selectionForCurrentDispatchDate } from '@/app/lib/dispatches/date-selection';
 
 type DispatchFilter = 'all' | 'pending' | 'printed' | 'waiting';
 type MarketplaceFilter = 'all' | 'mercado_libre' | 'falabella' | 'paris' | 'ripley' | 'walmart';
@@ -310,7 +311,9 @@ export default function DispatchCenter() {
       walmart.orders,
     );
     setOrders(nextOrders);
-    if (resetSelection) setSelection(defaultSelection(nextOrders));
+    if (resetSelection) {
+      setSelection(selectionForCurrentDispatchDate(nextOrders, chileDateKey()));
+    }
     else {
       setSelection((current) => {
         const selectableKeys = new Set(nextOrders.filter((order) => order.selectable).map((order) => order.key));
@@ -396,7 +399,7 @@ export default function DispatchCenter() {
         throw new Error(result?.error ?? 'No fue posible actualizar todos los marketplaces.');
       }
       const refreshed = await loadOrders(false);
-      setSelection(defaultSelection(refreshed));
+      setSelection(selectionForCurrentDispatchDate(refreshed, chileDateKey()));
       setNotice('Mercado Libre, Falabella, París, Ripley y Walmart quedaron actualizados.');
     } catch (syncError) {
       setError(syncError instanceof Error ? syncError.message : 'No fue posible actualizar los marketplaces.');

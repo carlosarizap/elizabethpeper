@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   createRipleyOrderListQuery,
   createRipleySvcBasicAuthorization,
+  getRipleySvcConnectionStatus,
   parseRipleyLabelDownloadResponse,
   RipleySvcError,
   ripleySvcError,
@@ -16,6 +17,59 @@ test('builds the SVC Basic credential from seller username and password', () => 
     Buffer.from(authorization.replace(/^Basic /, ''), 'base64').toString('utf8'),
     'seller_elipeper:secret',
   );
+});
+
+test('normalizes quotes and surrounding whitespace from the SVC API key', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalApiKey = process.env.RIPLEY_SVC_API_KEY;
+  const originalPassword = process.env.RIPLEY_SVC_PASSWORD;
+  let receivedCredential = '';
+
+  process.env.RIPLEY_SVC_API_KEY = '  "seller_elipeper:secret"  \n';
+  delete process.env.RIPLEY_SVC_PASSWORD;
+  globalThis.fetch = async (_input, options) => {
+    const authorization = new Headers(options?.headers).get('authorization') ?? '';
+    receivedCredential = Buffer.from(authorization.replace(/^Basic /, ''), 'base64').toString('utf8');
+    return new Response(JSON.stringify({ access_token: 'test-token' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+
+  try {
+    const status = await getRipleySvcConnectionStatus();
+    assert.equal(status.connected, true);
+    assert.equal(receivedCredential, 'seller_elipeper:secret');
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalApiKey === undefined) delete process.env.RIPLEY_SVC_API_KEY;
+    else process.env.RIPLEY_SVC_API_KEY = originalApiKey;
+    if (originalPassword === undefined) delete process.env.RIPLEY_SVC_PASSWORD;
+    else process.env.RIPLEY_SVC_PASSWORD = originalPassword;
+  }
+});
+
+test('keeps the response detail when Ripley rejects authentication', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalApiKey = process.env.RIPLEY_SVC_API_KEY;
+
+  process.env.RIPLEY_SVC_API_KEY = 'seller_elipeper:different-secret';
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    message: 'Invalid authentication credentials',
+  }), {
+    status: 403,
+    headers: { 'content-type': 'application/json' },
+  });
+
+  try {
+    const status = await getRipleySvcConnectionStatus();
+    assert.equal(status.connected, false);
+    assert.match(status.message ?? '', /403: Invalid authentication credentials/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalApiKey === undefined) delete process.env.RIPLEY_SVC_API_KEY;
+    else process.env.RIPLEY_SVC_API_KEY = originalApiKey;
+  }
 });
 
 test('uses the page pagination accepted by the Ripley order list', () => {

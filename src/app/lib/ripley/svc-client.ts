@@ -78,12 +78,25 @@ function cleanBaseUrl(value: string): string {
   return value.trim().replace(/\/+$/, '');
 }
 
+function cleanCredentialValue(value: string): string {
+  const trimmed = value.trim();
+  if (
+    trimmed.length >= 2
+    && ((trimmed.startsWith('"') && trimmed.endsWith('"'))
+      || (trimmed.startsWith("'") && trimmed.endsWith("'")))
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
 function splitApiKey(value: string): { username: string; password: string } | null {
-  const separator = value.indexOf(':');
-  if (separator <= 0 || separator === value.length - 1) return null;
+  const cleaned = cleanCredentialValue(value);
+  const separator = cleaned.indexOf(':');
+  if (separator <= 0 || separator === cleaned.length - 1) return null;
   return {
-    username: value.slice(0, separator).trim(),
-    password: value.slice(separator + 1),
+    username: cleaned.slice(0, separator).trim(),
+    password: cleaned.slice(separator + 1).trim(),
   };
 }
 
@@ -103,7 +116,8 @@ function readConfig(): RipleySvcConfig {
   const apiKey = splitApiKey(process.env.RIPLEY_SVC_API_KEY ?? '');
   const username = apiKey?.username
     ?? (process.env.RIPLEY_SVC_USERNAME?.trim() || DEFAULT_USERNAME);
-  const password = apiKey?.password ?? process.env.RIPLEY_SVC_PASSWORD ?? '';
+  const password = apiKey?.password
+    ?? cleanCredentialValue(process.env.RIPLEY_SVC_PASSWORD ?? '');
 
   if (!password) {
     throw new RipleySvcError(
@@ -189,8 +203,9 @@ async function authenticate(config: RipleySvcConfig, forceRefresh = false): Prom
 
   if (!response.ok || !token) {
     if (response.status === 401 || response.status === 403) {
+      const detail = responseMessage(payload, 'credenciales inválidas');
       throw new RipleySvcError(
-        'Ripley rechazó el acceso API SVC. Si seller_elipeper puede ingresar al portal con la misma contraseña, solicita a soporte que habilite o sincronice sus credenciales para /api/current/auth/login/vendor.',
+        `Ripley rechazó el acceso API SVC (${response.status}: ${detail}). Verifica que RIPLEY_SVC_API_KEY contenga exactamente usuario:contraseña; si coincide, solicita a soporte que habilite el acceso desde servidores externos para /api/current/auth/login/vendor.`,
         response.status,
       );
     }

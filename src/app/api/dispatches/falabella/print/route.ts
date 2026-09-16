@@ -116,23 +116,18 @@ export async function POST(request: NextRequest) {
         return { candidate, prepared: null, error: falabellaPrintError(error) };
       }
     });
-    let successful = attempts.filter((attempt) => !attempt.error && attempt.prepared);
+    const successful = attempts.filter((attempt) => !attempt.error && attempt.prepared);
     const failed = attempts.filter((attempt) => Boolean(attempt.error));
     const manifestCandidates = successful.filter((attempt) => !attempt.candidate.has_completed_print);
     let manifestDocuments: Uint8Array[] = [];
+    let manifestWarning: string | null = null;
     if (manifestCandidates.length > 0) {
       try {
         manifestDocuments = await createFalabellaForwardManifestPdfs(
           manifestCandidates.flatMap((attempt) => attempt.prepared?.orderItemIds ?? []),
         );
       } catch (error) {
-        const message = falabellaManifestError(error);
-        const blocked = new Set(manifestCandidates.map((attempt) => attempt.candidate.id));
-        failed.push(...manifestCandidates.map((attempt) => ({
-          ...attempt,
-          error: message,
-        })));
-        successful = successful.filter((attempt) => !blocked.has(attempt.candidate.id));
+        manifestWarning = `Las etiquetas Falabella sí fueron preparadas, pero ${falabellaManifestError(error).toLowerCase()}`;
       }
     }
 
@@ -168,7 +163,7 @@ export async function POST(request: NextRequest) {
       successful.flatMap((attempt) => attempt.prepared?.documents ?? []),
     );
     const letterPdf = await composeLetterLabelPdf([labelPdf, ...manifestDocuments]);
-    const status = failed.length > 0 ? 'partial' : 'completed';
+    const status = failed.length > 0 || manifestWarning ? 'partial' : 'completed';
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -197,7 +192,8 @@ export async function POST(request: NextRequest) {
           batchId,
           status,
           Buffer.from(letterPdf),
-          failed.length ? `${failed.length} etiqueta(s) Falabella no disponibles.` : null,
+          manifestWarning
+            ?? (failed.length ? `${failed.length} etiqueta(s) Falabella no disponibles.` : null),
         ],
       );
       await client.query('COMMIT');
@@ -213,6 +209,13 @@ export async function POST(request: NextRequest) {
       shipmentId: null,
       message: attempt.error ?? 'Etiqueta no disponible.',
     }));
+    if (manifestWarning && manifestCandidates[0]) {
+      failures.push({
+        orderId: manifestCandidates[0].candidate.order_id,
+        shipmentId: null,
+        message: manifestWarning,
+      });
+    }
     const response: DispatchPrintResponse = {
       batchId,
       status,

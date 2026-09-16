@@ -84,10 +84,12 @@ async function requestFalabella(
       });
 
   const payload = await response.json().catch(() => null) as Record<string, any> | null;
-  if (!response.ok || !payload) {
+  const apiError = payload ? falabellaError(payload) : null;
+  if (!response.ok) {
+    if (apiError) throw apiError;
     throw new Error(`Falabella respondió con código ${response.status}.`);
   }
-  const apiError = falabellaError(payload);
+  if (!payload) throw new Error(`Falabella respondió con código ${response.status}.`);
   if (apiError) throw apiError;
   if (!payload.SuccessResponse) throw new Error('Falabella devolvió una respuesta inesperada.');
   return payload;
@@ -123,6 +125,12 @@ function collectManifestCodes(value: unknown, codes = new Set<string>()): Set<st
 interface FalabellaManifestSummary {
   manifestCode: string;
   orderItemIds: string[];
+}
+
+const MANIFEST_CREATE_RETRY_DELAYS_MS = [800, 1_500, 2_500];
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function fetchFalabellaForwardManifests(): Promise<FalabellaManifestSummary[]> {
@@ -201,10 +209,40 @@ export async function createFalabellaForwardManifestPdfs(
     existingCodes.push(manifest.manifestCode);
   }
 
-  const uncoveredIds = requestedIds.filter((id) => !covered.has(id));
-  const createdCodes = uncoveredIds.length > 0
-    ? await createFalabellaForwardManifest(uncoveredIds)
-    : [];
+  let uncoveredIds = requestedIds.filter((id) => !covered.has(id));
+  const createdCodes: string[] = [];
+  let lastCreateError: unknown = null;
+
+  // La confirmación ready_to_ship de Falabella es eventualmente consistente.
+  // Si el manifiesto se solicita inmediatamente después, puede responder 400
+  // aunque la confirmación haya sido aceptada. Antes de cada reintento se vuelve
+  // a consultar la lista: así también recuperamos una creación que sí alcanzó
+  // a ejecutarse y evitamos que un ítem termine en dos manifiestos.
+  for (let attempt = 0; uncoveredIds.length > 0; attempt += 1) {
+    try {
+      createdCodes.push(...await createFalabellaForwardManifest(uncoveredIds));
+      uncoveredIds = [];
+      break;
+    } catch (error) {
+      lastCreateError = error;
+      const retryDelay = MANIFEST_CREATE_RETRY_DELAYS_MS[attempt];
+      if (retryDelay === undefined) break;
+      await wait(retryDelay);
+
+      const refreshed = await fetchFalabellaForwardManifests();
+      for (const manifest of refreshed) {
+        const matchingIds = manifest.orderItemIds.filter((id) => requested.has(id));
+        if (matchingIds.length === 0) continue;
+        matchingIds.forEach((id) => covered.add(id));
+        existingCodes.push(manifest.manifestCode);
+      }
+      uncoveredIds = requestedIds.filter((id) => !covered.has(id));
+    }
+  }
+
+  if (uncoveredIds.length > 0) {
+    throw lastCreateError ?? new Error('Falabella no permitió crear el manifiesto.');
+  }
   const codes = [...new Set([...existingCodes, ...createdCodes])];
   return Promise.all(codes.map((code) => downloadFalabellaManifestPdf(code)));
 }

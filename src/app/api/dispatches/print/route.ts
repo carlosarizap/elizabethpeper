@@ -294,7 +294,7 @@ export async function POST(request: NextRequest) {
     const falabellaManifestCandidates = falabellaAttempts.filter(
       (attempt) => !attempt.message && attempt.prepared && !attempt.candidate.has_completed_print,
     );
-    const falabellaManifestBlocked = new Set<string>();
+    let falabellaManifestWarning: Failed | null = null;
     if (falabellaManifestCandidates.length > 0) {
       try {
         falabellaManifestDocuments.push(...await createFalabellaForwardManifestPdfs(
@@ -302,15 +302,15 @@ export async function POST(request: NextRequest) {
         ));
       } catch (error) {
         const message = falabellaManifestError(error);
-        for (const attempt of falabellaManifestCandidates) {
-          falabellaManifestBlocked.add(attempt.candidate.id);
-          failed.push({ candidate: attempt.candidate, message });
-        }
+        falabellaManifestWarning = {
+          candidate: falabellaManifestCandidates[0].candidate,
+          message: `Las etiquetas Falabella sí fueron preparadas, pero ${message.toLowerCase()}`,
+        };
       }
     }
     for (const attempt of falabellaAttempts) {
       if (attempt.message) failed.push({ candidate: attempt.candidate, message: attempt.message });
-      else if (attempt.prepared && !falabellaManifestBlocked.has(attempt.candidate.id)) {
+      else if (attempt.prepared) {
         falabellaDocuments.push(...attempt.prepared.documents);
         completed.push({ candidate: attempt.candidate, shipmentId: null });
       }
@@ -468,7 +468,7 @@ export async function POST(request: NextRequest) {
     }
 
     const letterPdf = await composeLetterLabelPdf(sourceDocuments);
-    const batchStatus = failed.length === 0 ? 'completed' : 'partial';
+    const batchStatus = failed.length === 0 && !falabellaManifestWarning ? 'completed' : 'partial';
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -497,7 +497,8 @@ export async function POST(request: NextRequest) {
           batchId,
           batchStatus,
           Buffer.from(letterPdf),
-          failed.length ? `${failed.length} etiqueta(s) requieren atención.` : null,
+          falabellaManifestWarning?.message
+            ?? (failed.length ? `${failed.length} etiqueta(s) requieren atención.` : null),
         ],
       );
       await client.query('COMMIT');
@@ -512,7 +513,10 @@ export async function POST(request: NextRequest) {
       batchId,
       status: batchStatus,
       completedCount: completed.length,
-      failures: failed.map(toFailure),
+      failures: [
+        ...failed.map(toFailure),
+        ...(falabellaManifestWarning ? [toFailure(falabellaManifestWarning)] : []),
+      ],
       documentUrl: `/api/dispatches/batches/${batchId}/document`,
     };
     return NextResponse.json(response);

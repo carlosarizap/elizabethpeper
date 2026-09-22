@@ -96,7 +96,7 @@ async function getCampaign() {
        updated_at = NOW()
      RETURNING *`,
     [SLUG, NAME, DISCOUNT, START_AT, END_AT, JSON.stringify({
-      scope: 'Fundas y cojines decorativos activos; excluye rellenos individuales y Walmart',
+      scope: 'Fundas y cojines decorativos activos; excluye rellenos individuales',
       mercadoLibreCampaignId: ML_CAMPAIGN_ID,
       mercadoLibreStartsAt: ML_CAMPAIGN_START,
       mercadoLibreEndsAt: ML_CAMPAIGN_END,
@@ -515,6 +515,166 @@ async function scheduleShopify(campaign) {
   console.log(JSON.stringify({ marketplace: 'shopify', scheduled: items.length }));
 }
 
+function walmartCredentials() {
+  const clientId = process.env.WALMART_CLIENT_ID?.trim();
+  const clientSecret = process.env.WALMART_CLIENT_SECRET;
+  if (!clientId || !clientSecret) throw new Error('Faltan WALMART_CLIENT_ID o WALMART_CLIENT_SECRET.');
+  return { clientId, clientSecret };
+}
+
+function walmartHeaders(credentials, accessToken, contentType) {
+  return {
+    Authorization: `Basic ${Buffer.from(`${credentials.clientId}:${credentials.clientSecret}`).toString('base64')}`,
+    ...(accessToken ? { 'WM_SEC.ACCESS_TOKEN': accessToken } : {}),
+    WM_MARKET: 'cl',
+    WM_GLOBAL_VERSION: '3.1',
+    'WM_QOS.CORRELATION_ID': crypto.randomUUID(),
+    'WM_SVC.NAME': 'Walmart Marketplace',
+    Accept: 'application/json',
+    ...(contentType ? { 'Content-Type': contentType } : {}),
+  };
+}
+
+async function getWalmartToken() {
+  const credentials = walmartCredentials();
+  const { body } = await requestJson('https://marketplace.walmartapis.com/v3/token', {
+    method: 'POST',
+    headers: walmartHeaders(credentials, null, 'application/x-www-form-urlencoded'),
+    body: 'grant_type=client_credentials',
+  });
+  if (!body?.access_token) throw new Error(`Walmart no devolvió access token: ${JSON.stringify(body)}`);
+  return { credentials, accessToken: body.access_token };
+}
+
+async function fetchWalmartTargets() {
+  const session = await getWalmartToken();
+  const rows = [];
+  for (let offset = 0; offset < 20_000; offset += 200) {
+    const url = new URL('https://marketplace.walmartapis.com/v3/items');
+    url.searchParams.set('limit', '200');
+    url.searchParams.set('offset', String(offset));
+    const { body } = await requestJson(url, { headers: walmartHeaders(session.credentials, session.accessToken) });
+    const items = Array.isArray(body?.ItemResponse) ? body.ItemResponse : [];
+    for (const item of items) {
+      const sellerSku = String(item.sku ?? '').trim();
+      const title = String(item.productName ?? '').trim();
+      const price = toNumber(typeof item.price === 'object' ? item.price?.amount : item.price);
+      const active = String(item.publishedStatus ?? '').toUpperCase() === 'PUBLISHED';
+      if (!sellerSku || !title || !price || !active || !isDecorativeCushion(title)) continue;
+      rows.push({
+        marketplace: 'walmart',
+        external_product_id: String(item.wpid ?? sellerSku),
+        title,
+        product_status: 'active',
+        master_name: null,
+        external_variant_id: sellerSku,
+        seller_sku: sellerSku,
+        marketplace_sku: item.wpid ? String(item.wpid) : null,
+        label: title,
+        price,
+        sale_price: null,
+        variant_status: 'active',
+        raw_payload: item,
+      });
+    }
+    const total = Number(body?.totalItems ?? rows.length);
+    if (items.length < 200 || offset + items.length >= total) break;
+  }
+  return rows;
+}
+
+async function applyWalmart(campaign) {
+  const session = await getWalmartToken();
+  const items = limited(await getPlanned(campaign.id, 'walmart'));
+  let applied = 0; let failed = 0;
+
+  async function walmartRequest(path, options = {}) {
+    try {
+      return await requestJson(`https://marketplace.walmartapis.com${path}`, {
+        ...options,
+        headers: {
+          ...walmartHeaders(
+            session.credentials,
+            session.accessToken,
+            options.body ? 'application/json' : undefined,
+          ),
+          ...(options.headers ?? {}),
+        },
+      });
+    } catch (error) {
+      if (error?.status !== 401) throw error;
+      session.accessToken = (await getWalmartToken()).accessToken;
+      return requestJson(`https://marketplace.walmartapis.com${path}`, {
+        ...options,
+        headers: {
+          ...walmartHeaders(
+            session.credentials,
+            session.accessToken,
+            options.body ? 'application/json' : undefined,
+          ),
+          ...(options.headers ?? {}),
+        },
+      });
+    }
+  }
+
+  async function applyOne(item) {
+    try {
+      const existing = await walmartRequest(`/v3/promo/sku/${encodeURIComponent(item.seller_sku)}`);
+      const pricing = existing.body?.payload?.pricingList?.pricing;
+      const promotions = Array.isArray(pricing) ? pricing : pricing ? [pricing] : [];
+      const exact = promotions.find((promotion) => (
+        Number(promotion?.currentPrice?.value?.amount) === roundClp(item.promotion_price)
+        && Number(promotion?.effectiveDate) === Date.parse(START_AT)
+        && Number(promotion?.expirationDate) === Date.parse(END_AT)
+      ));
+      if (exact) {
+        await mark(item, 'applied', {
+          externalPromotionId: String(exact.promoId ?? 'walmart-promotion'),
+          metadata: { verifiedPromotion: exact },
+        });
+        applied += 1;
+        return;
+      }
+
+      const apiBody = {
+        sku: item.seller_sku,
+        pricing: [{
+          currentPriceType: 'REDUCED',
+          currentPrice: { currency: 'CLP', amount: roundClp(item.promotion_price) },
+          comparisonPrice: { currency: 'CLP', amount: roundClp(item.regular_price) },
+          comparisonPriceType: 'BASE',
+          effectiveDate: START_AT,
+          expirationDate: END_AT,
+          processMode: 'UPSERT',
+        }],
+      };
+      const { body } = await walmartRequest('/v3/price?promo=true', {
+        method: 'PUT',
+        body: JSON.stringify(apiBody),
+      });
+      const errors = Array.isArray(body?.errors) ? body.errors : [];
+      if (Number(body?.statusCode ?? 200) >= 400 || errors.length) {
+        throw new Error(`Walmart rechazó la promoción: ${JSON.stringify(body)}`);
+      }
+      await mark(item, 'applied', {
+        externalPromotionId: 'walmart-cl-price-api',
+        metadata: { apiResponse: body },
+      });
+      applied += 1;
+    } catch (error) {
+      await mark(item, 'failed', { error: error.message });
+      failed += 1;
+    }
+  }
+
+  for (const item of items) {
+    await applyOne(item);
+    await sleep(1000);
+  }
+  console.log(JSON.stringify({ marketplace: 'walmart', applied, failed }));
+}
+
 async function stageAll(campaign) {
   const marketplaces = ['mercado_libre', 'falabella', 'paris', 'ripley', 'shopify'];
   for (const marketplace of marketplaces) {
@@ -522,6 +682,9 @@ async function stageAll(campaign) {
     await stageTargets(campaign, marketplace, rows);
     console.log(JSON.stringify({ marketplace, selected: rows.length }));
   }
+  const walmartRows = await fetchWalmartTargets();
+  await stageTargets(campaign, 'walmart', walmartRows);
+  console.log(JSON.stringify({ marketplace: 'walmart', selected: walmartRows.length }));
 }
 
 async function summary(campaign) {
@@ -548,6 +711,7 @@ async function main() {
       paris: applyParis,
       ripley: applyRipley,
       shopify: scheduleShopify,
+      walmart: applyWalmart,
     };
     if (marketplace) {
       if (!actions[marketplace]) throw new Error(`Marketplace inválido: ${marketplace}`);

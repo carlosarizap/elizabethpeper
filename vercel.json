@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/returns",
       "schedule": "30 4 * * *"
+    },
+    {
+      "path": "/api/cron/promotions",
+      "schedule": "0 3 * * *"
     }
   ]
   

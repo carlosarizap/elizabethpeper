@@ -95,15 +95,6 @@ async function requestFalabella(
   return payload;
 }
 
-function xmlEscape(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
 function collectManifestCodes(value: unknown, codes = new Set<string>()): Set<string> {
   if (!value || typeof value !== 'object') return codes;
   for (const [key, child] of Object.entries(value)) {
@@ -156,12 +147,13 @@ export async function createFalabellaForwardManifest(
 ): Promise<string[]> {
   const uniqueIds = [...new Set(orderItemIds.map((id) => id.trim()).filter(Boolean))];
   if (uniqueIds.length === 0) throw new Error('No hay ítems Falabella para crear el manifiesto.');
-  const requestXml = [
-    '<Request><OrderItemIds>',
-    ...uniqueIds.map((id) => `<OrderItemId>${xmlEscape(id)}</OrderItemId>`),
-    '</OrderItemIds></Request>',
-  ].join('');
-  const payload = await requestFalabella('CreateForwardManifest', {}, 'POST', requestXml);
+  const requestXml = `<Request><OrderItemIds>${uniqueIds.join(',')}</OrderItemIds></Request>`;
+  const payload = await requestFalabella(
+    'CreateForwardManifest',
+    {},
+    'POST',
+    requestXml,
+  );
   const manifestCodes = [...collectManifestCodes(payload?.SuccessResponse?.Body)];
   if (manifestCodes.length === 0) {
     throw new Error('Falabella creó el manifiesto, pero no devolvió su código.');

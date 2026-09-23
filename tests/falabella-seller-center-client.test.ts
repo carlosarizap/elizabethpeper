@@ -58,7 +58,7 @@ test('Falabella envía los parámetros firmados del POST en la URL', async () =>
   }
 });
 
-test('crea un manifiesto Falabella agrupando los ítems en XML', async () => {
+test('crea un manifiesto Falabella agrupando los ítems como texto XML', async () => {
   const originalFetch = globalThis.fetch;
   const originalUserId = process.env.FALABELLA_USER_ID;
   const originalApiKey = process.env.FALABELLA_API_KEY;
@@ -85,7 +85,7 @@ test('crea un manifiesto Falabella agrupando los ítems en XML', async () => {
     assert.equal(requestOptions?.headers && (requestOptions.headers as Record<string, string>)['content-type'], 'application/xml');
     assert.equal(
       requestOptions?.body,
-      '<Request><OrderItemIds><OrderItemId>10</OrderItemId><OrderItemId>11</OrderItemId></OrderItemIds></Request>',
+      '<Request><OrderItemIds>10,11</OrderItemIds></Request>',
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -240,7 +240,7 @@ test('reutiliza el manifiesto remoto y crea otro solo para ítems todavía no ma
     ]);
     assert.equal(
       createBody,
-      '<Request><OrderItemIds><OrderItemId>11</OrderItemId></OrderItemIds></Request>',
+      '<Request><OrderItemIds>11</OrderItemIds></Request>',
     );
   } finally {
     globalThis.fetch = originalFetch;

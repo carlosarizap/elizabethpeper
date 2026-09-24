@@ -13,13 +13,24 @@ const WALMART_API_BASE = 'https://marketplace.walmartapis.com';
 const WALMART_GLOBAL_VERSION = '3.1';
 const REQUEST_TIMEOUT_MS = 30_000;
 const TOKEN_EXPIRY_MARGIN_MS = 60_000;
-const LABEL_POLL_ATTEMPTS = 4;
-const LABEL_POLL_DELAY_MS = 750;
+const LABEL_RETRY_DELAYS_MS = [1_500, 3_000, 5_000, 8_000, 12_000, 18_000, 25_000, 30_000];
+const LABEL_TRANSIENT_STATUSES = new Set([400, 404, 409, 429, 500, 502, 503, 504]);
 const LETTER_WIDTH = 612;
 const LETTER_HEIGHT = 792;
-const LETTER_MARGIN = 12;
-const SUMMARY_HEIGHT = 92;
-const SUMMARY_GAP = 6;
+const GRID_MARGIN = 18;
+const GRID_GAP = 12;
+const GRID_COLUMNS = 2;
+const GRID_ROWS = 2;
+const SUMMARY_HEIGHT = 58;
+const SUMMARY_GAP = 4;
+const WALMART_CROP = {
+  left: 30,
+  // El PDF Walmart es A4 y agrega metadatos técnicos bajo el logo. El corte
+  // conserva etiqueta + logo, pero excluye nro_de_linea/service/etc.
+  bottom: 550,
+  right: 300,
+  top: 815,
+};
 
 interface WalmartCredentials {
   clientId: string;
@@ -45,6 +56,16 @@ export interface WalmartLabelPrintInput {
   document: Uint8Array;
   orderId: string;
   productSummary: string | null;
+}
+
+export interface WalmartPreparedLabelDocument {
+  document: Uint8Array;
+  productSummary: string;
+}
+
+export interface WalmartLabelGroup {
+  trackingNumbers: string[];
+  productSummary: string;
 }
 
 let tokenCache: { token: string; expiresAt: number } | null = null;
@@ -195,6 +216,26 @@ export function getWalmartTrackingNumbers(order: WalmartOrder): string[] {
   )];
 }
 
+export function getWalmartLabelGroups(order: WalmartOrder): WalmartLabelGroup[] {
+  const grouped = new Map<string, Set<string>>();
+  for (const line of toArray(order.orderLines?.orderLine)) {
+    const title = String(line.item?.productName ?? line.item?.sku ?? 'Producto Walmart').trim()
+      || 'Producto Walmart';
+    const trackingNumbers = toArray(line.orderLineStatuses?.orderLineStatus)
+      .map((status) => String(status.trackingInfo?.trackingNumber ?? '').trim())
+      .filter(Boolean);
+    if (trackingNumbers.length === 0) continue;
+    const group = grouped.get(title) ?? new Set<string>();
+    for (const trackingNumber of trackingNumbers) group.add(trackingNumber);
+    grouped.set(title, group);
+  }
+  return [...grouped.entries()].map(([title, trackingNumbers]) => ({
+    trackingNumbers: [...trackingNumbers],
+    // Walmart emite una etiqueta por unidad, aunque varias unidades compartan producto.
+    productSummary: `1 - ${title}`,
+  }));
+}
+
 export function getWalmartLabelEligibility(order: WalmartOrder): WalmartLabelEligibility {
   const statuses = getWalmartCurrentStatuses(order).map((status) => status.toUpperCase());
   if (statuses.length === 0) {
@@ -266,29 +307,52 @@ function isPdf(document: Uint8Array): boolean {
     && Buffer.from(document.subarray(0, 5)).toString('ascii') === '%PDF-';
 }
 
-async function downloadWalmartLabel(trackingNumber: string): Promise<Uint8Array> {
-  const response = await walmartRequest(
-    `/v3/orders/label/${encodeURIComponent(trackingNumber)}`,
-    {},
-    'application/octet-stream',
-  );
-  const document = new Uint8Array(await response.arrayBuffer());
-  if (!response.ok || !isPdf(document)) {
+async function downloadWalmartLabels(trackingNumbers: readonly string[]): Promise<Uint8Array> {
+  let lastError = 'La etiqueta todavía se está generando.';
+  for (let attempt = 0; attempt <= LABEL_RETRY_DELAYS_MS.length; attempt += 1) {
+    const response = await walmartRequest(
+      '/v3/orders/labels',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          FORMAT: 'PDF',
+        },
+        body: JSON.stringify({ trackingNumbers: [...new Set(trackingNumbers)] }),
+      },
+      'application/octet-stream',
+    );
+    const document = new Uint8Array(await response.arrayBuffer());
+    if (response.ok && isPdf(document)) return document;
+
     let detail: unknown = '';
     try {
       detail = JSON.parse(Buffer.from(document).toString('utf8'));
     } catch {
       detail = Buffer.from(document).toString('utf8');
     }
-    throw new Error(
-      `Walmart no entregó una etiqueta PDF: ${errorMessage(detail, response.status)}.`,
-    );
+    lastError = errorMessage(detail, response.status);
+    const retryable = LABEL_TRANSIENT_STATUSES.has(response.status)
+      || (response.ok && !isPdf(document));
+    if (!retryable || attempt === LABEL_RETRY_DELAYS_MS.length) break;
+    await wait(labelRetryDelay(response, LABEL_RETRY_DELAYS_MS[attempt]));
   }
-  return document;
+  throw new Error(`Walmart no entregó el PDF de etiquetas: ${lastError}.`);
 }
 
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function labelRetryDelay(response: Response, fallback: number): number {
+  const retryAfter = response.headers.get('retry-after');
+  if (retryAfter === null) return fallback;
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds)) return Math.max(0, Math.min(seconds * 1_000, 30_000));
+  const date = Date.parse(retryAfter);
+  return Number.isFinite(date)
+    ? Math.max(0, Math.min(date - Date.now(), 30_000))
+    : fallback;
 }
 
 async function waitForTrackingNumbers(order: WalmartOrder): Promise<{
@@ -296,11 +360,11 @@ async function waitForTrackingNumbers(order: WalmartOrder): Promise<{
   trackingNumbers: string[];
 }> {
   let current = order;
-  for (let attempt = 0; attempt < LABEL_POLL_ATTEMPTS; attempt += 1) {
+  for (let attempt = 0; attempt <= LABEL_RETRY_DELAYS_MS.length; attempt += 1) {
     const trackingNumbers = getWalmartTrackingNumbers(current);
     if (trackingNumbers.length > 0) return { order: current, trackingNumbers };
-    if (attempt < LABEL_POLL_ATTEMPTS - 1) {
-      await wait(LABEL_POLL_DELAY_MS);
+    if (attempt < LABEL_RETRY_DELAYS_MS.length) {
+      await wait(LABEL_RETRY_DELAYS_MS[attempt]);
       current = await fetchWalmartOrderForLabel(String(current.purchaseOrderId));
     }
   }
@@ -309,7 +373,7 @@ async function waitForTrackingNumbers(order: WalmartOrder): Promise<{
 
 export async function prepareWalmartShippingLabelPdfs(
   purchaseOrderId: string,
-): Promise<{ documents: Uint8Array[]; acknowledged: boolean }> {
+): Promise<{ documents: WalmartPreparedLabelDocument[]; acknowledged: boolean }> {
   let order = await fetchWalmartOrderForLabel(purchaseOrderId);
   const eligibility = getWalmartLabelEligibility(order);
   if (!eligibility.eligible) {
@@ -329,9 +393,24 @@ export async function prepareWalmartShippingLabelPdfs(
     );
   }
 
-  const documents: Uint8Array[] = [];
-  for (const trackingNumber of prepared.trackingNumbers) {
-    documents.push(await downloadWalmartLabel(trackingNumber));
+  const groups = getWalmartLabelGroups(prepared.order);
+  const assignedTrackingNumbers = new Set(groups.flatMap((group) => group.trackingNumbers));
+  const unassignedTrackingNumbers = prepared.trackingNumbers.filter(
+    (trackingNumber) => !assignedTrackingNumbers.has(trackingNumber),
+  );
+  if (unassignedTrackingNumbers.length > 0) {
+    groups.push({
+      trackingNumbers: unassignedTrackingNumbers,
+      productSummary: '1 - Producto Walmart',
+    });
+  }
+
+  const documents: WalmartPreparedLabelDocument[] = [];
+  for (const group of groups) {
+    documents.push({
+      document: await downloadWalmartLabels(group.trackingNumbers),
+      productSummary: group.productSummary,
+    });
   }
   return { documents, acknowledged };
 }
@@ -346,38 +425,55 @@ export async function composeWalmartLabelsWithProductSummaryPdf(
   const output = await PDFDocument.create();
   const regularFont = await output.embedFont(StandardFonts.Helvetica);
   const boldFont = await output.embedFont(StandardFonts.HelveticaBold);
-  const summaryY = LETTER_HEIGHT - LETTER_MARGIN - SUMMARY_HEIGHT;
-  const availableWidth = LETTER_WIDTH - LETTER_MARGIN * 2;
-  const availableHeight = summaryY - SUMMARY_GAP - LETTER_MARGIN;
+  const cropWidth = WALMART_CROP.right - WALMART_CROP.left;
+  const cropHeight = WALMART_CROP.top - WALMART_CROP.bottom;
+  const cellWidth = (
+    LETTER_WIDTH - GRID_MARGIN * 2 - GRID_GAP * (GRID_COLUMNS - 1)
+  ) / GRID_COLUMNS;
+  const cellHeight = (
+    LETTER_HEIGHT - GRID_MARGIN * 2 - GRID_GAP * (GRID_ROWS - 1)
+  ) / GRID_ROWS;
 
+  let labelIndex = 0;
   for (const input of inputs) {
     const source = await PDFDocument.load(input.document);
     for (const sourcePage of source.getPages()) {
-      const page = output.addPage([LETTER_WIDTH, LETTER_HEIGHT]);
-      const { width, height } = sourcePage.getSize();
-      const scale = Math.min(1, availableWidth / width, availableHeight / height);
-      const drawWidth = width * scale;
-      const drawHeight = height * scale;
-      const embeddedPage = await output.embedPage(sourcePage);
+      const slot = labelIndex % (GRID_COLUMNS * GRID_ROWS);
+      const targetPage = slot === 0
+        ? output.addPage([LETTER_WIDTH, LETTER_HEIGHT])
+        : output.getPage(output.getPageCount() - 1);
+      const column = slot % GRID_COLUMNS;
+      const rowFromTop = Math.floor(slot / GRID_COLUMNS);
+      const cellX = GRID_MARGIN + column * (cellWidth + GRID_GAP);
+      const cellY = LETTER_HEIGHT
+        - GRID_MARGIN
+        - (rowFromTop + 1) * cellHeight
+        - rowFromTop * GRID_GAP;
+      const availableLabelHeight = cellHeight - SUMMARY_HEIGHT - SUMMARY_GAP;
+      const scale = Math.min(cellWidth / cropWidth, availableLabelHeight / cropHeight);
+      const drawWidth = cropWidth * scale;
+      const drawHeight = cropHeight * scale;
+      const embeddedPage = await output.embedPage(sourcePage, WALMART_CROP);
 
-      page.drawPage(embeddedPage, {
-        x: LETTER_MARGIN + (availableWidth - drawWidth) / 2,
-        y: LETTER_MARGIN + (availableHeight - drawHeight) / 2,
+      targetPage.drawPage(embeddedPage, {
+        x: cellX + (cellWidth - drawWidth) / 2,
+        y: cellY + (availableLabelHeight - drawHeight) / 2,
         width: drawWidth,
         height: drawHeight,
       });
-      drawProductSummaryBlock(page, {
-        x: LETTER_MARGIN,
-        y: summaryY,
-        width: availableWidth,
+      drawProductSummaryBlock(targetPage, {
+        x: cellX,
+        y: cellY + availableLabelHeight + SUMMARY_GAP,
+        width: cellWidth,
         height: SUMMARY_HEIGHT,
         orderId: input.orderId,
         productSummary: input.productSummary,
         regularFont,
         boldFont,
-        bodyFontSize: 8,
-        maxLines: 8,
+        bodyFontSize: 6.5,
+        maxLines: 4,
       });
+      labelIndex += 1;
     }
   }
 

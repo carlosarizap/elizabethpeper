@@ -33,6 +33,7 @@ import {
   prepareWalmartShippingLabelPdfs,
   walmartLabelError,
   type WalmartLabelPrintInput,
+  type WalmartPreparedLabelDocument,
 } from '@/app/lib/walmart/shipping-labels';
 
 export const dynamic = 'force-dynamic';
@@ -410,7 +411,7 @@ export async function POST(request: NextRequest) {
       } catch (error) {
         return {
           candidate,
-          documents: [] as Uint8Array[],
+          documents: [] as WalmartPreparedLabelDocument[],
           acknowledged: false,
           message: walmartLabelError(error),
         };
@@ -420,10 +421,10 @@ export async function POST(request: NextRequest) {
       if (attempt.message) {
         failed.push({ candidate: attempt.candidate, message: attempt.message });
       } else {
-        walmartDocuments.push(...attempt.documents.map((document) => ({
-          document,
+        walmartDocuments.push(...attempt.documents.map((preparedDocument) => ({
+          document: preparedDocument.document,
           orderId: attempt.candidate.order_id,
-          productSummary: attempt.candidate.product_summary,
+          productSummary: preparedDocument.productSummary,
         })));
         completed.push({ candidate: attempt.candidate, shipmentId: null });
         await pool.query(

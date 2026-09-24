@@ -3,7 +3,9 @@ import { drawProductSummaryBlock } from '../dispatches/product-summary-pdf.ts';
 import { composeLetterLabelPdf } from '../mercadolibre/shipping-label-utils.ts';
 
 const PARIS_API = 'https://api-developers.ecomm.cencosud.com';
-const PARIS_TRANSIENT_STATUSES = new Set([429, 502, 503, 504]);
+// París también usa 409 mientras la etiqueta todavía se está publicando. La
+// consulta es un GET idempotente, por lo que podemos esperar y repetirla.
+const PARIS_TRANSIENT_STATUSES = new Set([409, 429, 502, 503, 504]);
 const PARIS_RETRY_DELAYS_MS = [500, 1_500, 3_000, 5_000, 8_000];
 
 const LETTER_WIDTH = 612;

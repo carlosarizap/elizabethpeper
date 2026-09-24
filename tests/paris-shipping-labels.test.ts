@@ -102,6 +102,41 @@ test('París reintenta automáticamente un 503 temporal del balanceador', async 
   }
 });
 
+test('París espera cuando la etiqueta responde 409 mientras se publica', async () => {
+  const originalFetch = globalThis.fetch;
+  let labelAttempts = 0;
+
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith('/v2/shipments/3142102340')) {
+      return Response.json([{ labelId: 'PUBLISHING123', nPackages: 1 }]);
+    }
+    if (url.endsWith('/v1/sub-orders/PUBLISHING123/print-label')) {
+      labelAttempts += 1;
+      if (labelAttempts === 1) {
+        return Response.json(
+          { message: 'label is still being generated' },
+          { status: 409, headers: { 'retry-after': '0' } },
+        );
+      }
+      return Response.json({ data: [{ labels: 'https://labels.example/published.pdf' }] });
+    }
+    if (url === 'https://labels.example/published.pdf') {
+      return new Response(PDF_BYTES, { status: 200, headers: { 'content-type': 'application/pdf' } });
+    }
+    return new Response(null, { status: 404 });
+  };
+
+  try {
+    const documents = await downloadParisShippingLabelPdfs('3142102340', 'derived-token');
+
+    assert.equal(labelAttempts, 2);
+    assert.equal(documents.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('París compone cuatro etiquetas en una sola hoja carta', async () => {
   const documents: Uint8Array[] = [];
   for (let index = 0; index < 4; index += 1) {

@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowPathIcon,
   CalendarDaysIcon,
@@ -24,7 +24,10 @@ import type {
   WalmartDispatchOrder,
   WalmartDispatchResponse,
 } from '@/app/lib/dispatches/definitions';
-import { selectionForCurrentDispatchDate } from '@/app/lib/dispatches/date-selection';
+import {
+  newlyDiscoveredPendingOrdersForToday,
+  selectionForCurrentDispatchDate,
+} from '@/app/lib/dispatches/date-selection';
 
 type DispatchFilter = 'all' | 'pending' | 'printed' | 'waiting';
 type MarketplaceFilter = 'all' | 'mercado_libre' | 'falabella' | 'paris' | 'ripley' | 'walmart';
@@ -74,6 +77,27 @@ const STATUS_FILTERS: Array<{ id: DispatchFilter; label: string }> = [
   { id: 'printed', label: 'Impresos' },
   { id: 'waiting', label: 'Esperando etiqueta' },
 ];
+
+const MARKETPLACE_SYNC_TARGETS = [
+  { label: 'Mercado Libre', path: '/api/mercadolibre/orders?mode=orders' },
+  { label: 'Falabella', path: '/api/falabella/orders?mode=orders' },
+  { label: 'París', path: '/api/paris/orders?mode=orders' },
+  { label: 'Ripley', path: '/api/ripley/orders?mode=orders' },
+  { label: 'Walmart', path: '/api/walmart/orders?mode=orders' },
+] as const;
+
+function syncPayloadHasFailures(payload: unknown): boolean {
+  if (!payload || typeof payload !== 'object') return false;
+  const record = payload as { inserted?: unknown; results?: unknown };
+  const entries = Array.isArray(record.inserted)
+    ? record.inserted
+    : Array.isArray(record.results) ? record.results : [];
+  return entries.some((entry) => (
+    Boolean(entry)
+    && typeof entry === 'object'
+    && ('error' in entry || ('success' in entry && entry.success === false))
+  ));
+}
 
 function chileDateKey(date = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -249,6 +273,7 @@ function marketplaceLabel(value?: string): string {
 }
 
 export default function DispatchCenter() {
+  const initialized = useRef(false);
   const [orders, setOrders] = useState<UnifiedOrder[]>([]);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [statusFilter, setStatusFilter] = useState<DispatchFilter>('all');
@@ -323,11 +348,62 @@ export default function DispatchCenter() {
     return nextOrders;
   }, []);
 
+  const synchronizeMarketplaces = useCallback(async () => {
+    const results = await Promise.all(MARKETPLACE_SYNC_TARGETS.map(async (target) => {
+      try {
+        const response = await fetch(target.path, { cache: 'no-store' });
+        const payload = await response.json().catch(() => null) as ApiError | null;
+        return {
+          label: target.label,
+          ok: response.ok && !syncPayloadHasFailures(payload),
+          message: payload?.error ?? null,
+        };
+      } catch (requestError) {
+        return {
+          label: target.label,
+          ok: false,
+          message: requestError instanceof Error ? requestError.message : null,
+        };
+      }
+    }));
+    const failed = results.filter((result) => !result.ok);
+    if (failed.length > 0) {
+      const detail = failed
+        .map((result) => result.message ? `${result.label}: ${result.message}` : result.label)
+        .join(' · ');
+      throw new Error(`No fue posible actualizar: ${detail}.`);
+    }
+  }, []);
+
   useEffect(() => {
-    loadOrders(true)
-      .catch((requestError) => setError(requestError instanceof Error ? requestError.message : 'No fue posible cargar los despachos.'))
-      .finally(() => setLoading(false));
-  }, [loadOrders]);
+    if (initialized.current) return;
+    initialized.current = true;
+
+    const initialize = async () => {
+      setSyncing(true);
+      setError(null);
+      try {
+        await synchronizeMarketplaces();
+        setNotice('Los marketplaces se actualizaron automáticamente antes de mostrar la bandeja.');
+      } catch (syncError) {
+        setError(
+          `${syncError instanceof Error ? syncError.message : 'No fue posible actualizar los marketplaces.'} `
+          + 'Se muestran los datos disponibles, pero no imprimas hasta completar una actualización.',
+        );
+      }
+
+      try {
+        await loadOrders(true);
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : 'No fue posible cargar los despachos.');
+      } finally {
+        setSyncing(false);
+        setLoading(false);
+      }
+    };
+
+    void initialize();
+  }, [loadOrders, synchronizeMarketplaces]);
 
   const visibleOrders = useMemo(
     () => orders.filter((order) => (
@@ -386,18 +462,7 @@ export default function DispatchCenter() {
     setError(null);
     setNotice(null);
     try {
-      const responses = await Promise.all([
-        fetch('/api/mercadolibre/orders?mode=orders', { cache: 'no-store' }),
-        fetch('/api/falabella/orders?mode=orders', { cache: 'no-store' }),
-        fetch('/api/paris/orders?mode=orders', { cache: 'no-store' }),
-        fetch('/api/ripley/orders?mode=orders', { cache: 'no-store' }),
-        fetch('/api/walmart/orders?mode=orders', { cache: 'no-store' }),
-      ]);
-      const failedResponse = responses.find((response) => !response.ok);
-      if (failedResponse) {
-        const result = await failedResponse.json().catch(() => null) as ApiError | null;
-        throw new Error(result?.error ?? 'No fue posible actualizar todos los marketplaces.');
-      }
+      await synchronizeMarketplaces();
       const refreshed = await loadOrders(false);
       setSelection(selectionForCurrentDispatchDate(refreshed, chileDateKey()));
       setNotice('Mercado Libre, Falabella, París, Ripley y Walmart quedaron actualizados.');
@@ -421,12 +486,40 @@ export default function DispatchCenter() {
     setFailures([]);
     setFallbackDocument(null);
     try {
+      const ordersBeforeSync = orders;
+      await synchronizeMarketplaces();
+      const refreshedOrders = await loadOrders(false);
+      const discoveredKeys = newlyDiscoveredPendingOrdersForToday(
+        ordersBeforeSync,
+        refreshedOrders,
+        chileDateKey(),
+      );
+      if (discoveredKeys.size > 0) {
+        if (printWindow) printWindow.close();
+        setSelection((current) => new Set([...current, ...discoveredKeys]));
+        const discovered = refreshedOrders.filter((order) => discoveredKeys.has(order.key));
+        setNotice(
+          `Se encontraron ${discovered.length} orden(es) nueva(s) para hoy: `
+          + `${discovered.map((order) => order.orderId).join(', ')}. `
+          + 'Quedaron seleccionadas; revísalas y vuelve a presionar “Preparar e imprimir”.',
+        );
+        return;
+      }
+
+      const refreshedSelection = refreshedOrders.filter((order) => (
+        selection.has(order.key) && order.selectable
+      ));
+      if (refreshedSelection.length === 0) {
+        if (printWindow) printWindow.close();
+        throw new Error('Después de actualizar, las órdenes seleccionadas ya no están disponibles para imprimir.');
+      }
+
       const response = await fetch('/api/dispatches/print', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           clientRequestId: crypto.randomUUID(),
-          orderHeaderIds: selectedOrders.map((order) => order.id),
+          orderHeaderIds: refreshedSelection.map((order) => order.id),
         }),
       });
       const result = await response.json().catch(() => null) as DispatchPrintResponse | ApiError | null;
@@ -449,6 +542,7 @@ export default function DispatchCenter() {
       await loadOrders(false);
       setSelection(new Set());
     } catch (printError) {
+      if (printWindow) printWindow.close();
       setError(printError instanceof Error ? printError.message : 'No fue posible preparar las etiquetas.');
     } finally {
       setPrinting(false);

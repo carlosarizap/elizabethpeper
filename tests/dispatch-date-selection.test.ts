@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { selectionForCurrentDispatchDate } from '../src/app/lib/dispatches/date-selection.ts';
+import {
+  newlyDiscoveredPendingOrdersForToday,
+  selectionForCurrentDispatchDate,
+} from '../src/app/lib/dispatches/date-selection.ts';
 
 const order = (
   key: string,
@@ -51,4 +54,26 @@ test('no selecciona automáticamente órdenes sin fecha confirmada', () => {
   ], '2026-09-16');
 
   assert.equal(selection.size, 0);
+});
+
+test('detecta una orden de hoy que aparece en la sincronización previa a imprimir', () => {
+  const discovered = newlyDiscoveredPendingOrdersForToday([
+    order('falabella:conocida', '2026-09-28'),
+  ], [
+    order('falabella:conocida', '2026-09-28'),
+    order('falabella:nueva', '2026-09-28'),
+    order('paris:manana', '2026-09-29'),
+    order('walmart:impresa', '2026-09-28', { printCount: 1 }),
+  ], '2026-09-28');
+
+  assert.deepEqual([...discovered], ['falabella:nueva']);
+});
+
+test('no bloquea la impresión por órdenes nuevas que no están disponibles', () => {
+  const discovered = newlyDiscoveredPendingOrdersForToday([], [
+    order('ripley:no-disponible', '2026-09-28', { selectable: false }),
+    order('mercadolibre:sin-fecha', null),
+  ], '2026-09-28');
+
+  assert.equal(discovered.size, 0);
 });

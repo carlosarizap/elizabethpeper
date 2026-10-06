@@ -28,11 +28,10 @@ export async function generateInvoices() {
              FROM order_header
              WHERE has_invoice = false
                AND document_type IN ($1, $2)
-               -- TODO: quitar 'pendiente' antes de procesar documentos en producciÃ³n.
-               AND status IN ($3, $4, $5)
+               AND status IN ($3, $4)
                AND COALESCE(return_status, 'sin_devolucion') = 'sin_devolucion'
              ORDER BY created_at ASC`,
-            ['factura', 'boleta', 'enviado', 'recibido', 'pendiente']
+            ['factura', 'boleta', 'enviado', 'recibido']
         );
 
         if (orderHeaders.length === 0) {
@@ -586,12 +585,23 @@ async function processReceipts(
         );
         console.log(`Boleta de la orden ${header.order_id} emitida y guardada correctamente`);
 
-        const closeButton = await driver.wait(
-            until.elementLocated(By.xpath('//i[contains(text(), "close")]')),
-            10000
+        const closeIcon = await driver.wait(async () => {
+            const closeIcons = await driver.findElements(
+                By.xpath('//i[normalize-space()="close"]')
+            );
+
+            for (const icon of closeIcons) {
+                if (await icon.isDisplayed()) return icon;
+            }
+
+            return false;
+        }, 20000);
+        await driver.executeScript(
+            'const button = arguments[0].closest("button");' +
+            'if (!button) throw new Error("No se encontrÃ³ el botÃ³n para cerrar la boleta");' +
+            'button.click();',
+            closeIcon
         );
-        await driver.wait(until.elementIsVisible(closeButton), 10000);
-        await closeButton.click();
     }
 }
 

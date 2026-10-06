@@ -6,7 +6,6 @@ import {
   getProductSize,
 } from '../products/fill-classification';
 
-const ITEMS_PER_PAGE = 150;
 const DASHBOARD_MONTH_FILTER = `
   (oh.created_at AT TIME ZONE 'America/Santiago')::date >= make_date($1, $2, 1)
   AND (oh.created_at AT TIME ZONE 'America/Santiago')::date <
@@ -34,10 +33,9 @@ function appendGroupedDetail(
   order.details.push(detail);
 }
 
-export async function fetchOrders(page: number = 1, query: string = '') {
+export async function fetchOrders(_page: number = 1, query: string = '') {
   noStore();
   try {
-    const offset = (page - 1) * ITEMS_PER_PAGE;
     const client = await pool.connect();
 
     const result = await client.query(
@@ -117,9 +115,8 @@ export async function fetchOrders(page: number = 1, query: string = '') {
           WHEN oh.marketplace = 'walmart' THEN 5
           ELSE 6
         END,
-        oh.delivery_date ASC NULLS FIRST
-      LIMIT $2 OFFSET $3`,
-      [`%${query}%`, ITEMS_PER_PAGE, offset]
+        oh.delivery_date ASC NULLS FIRST`,
+      [`%${query}%`]
     );
 
     const rellenos: Record<string, number> = {};

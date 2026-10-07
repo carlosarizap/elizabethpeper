@@ -12,6 +12,7 @@ import {
 } from '@heroicons/react/24/solid';
 import { OrderHeader } from '../lib/definitions/order_header';
 import OrderStatusBadge, { ReturnStatusBadge } from './OrderStatusBadge';
+import ProductImagePreview from './ProductImagePreview';
 
 interface Props {
   orders: OrderHeader[];
@@ -233,7 +234,12 @@ export default function OrderTable({ orders }: Props) {
                               {detail.product_quantity}×
                             </span>
                             <div className="min-w-0 flex-1">
-                              <p className="text-sm font-medium leading-5 text-slate-800">{detail.product_title}</p>
+                              <p className="text-sm font-medium leading-5 text-slate-800">
+                                <ProductImagePreview
+                                  title={detail.product_title}
+                                  imageUrl={detail.image_url}
+                                />
+                              </p>
                               <p className="mt-1 text-xs text-slate-500">
                                 {currency.format(Number(detail.product_price))} por unidad
                                 {detail.marketplace_status ? ` · Original: ${detail.marketplace_status}` : ''}

@@ -8,6 +8,7 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import OrderStatusBadge from "../components/OrderStatusBadge";
 import StatusRefreshToast, { ToastFeedback } from "../components/StatusRefreshToast";
 import { isFilledProductTitle } from "../lib/products/fill-classification";
+import ProductImagePreview from "../components/ProductImagePreview";
 
 const getMarketplaceLogo = (marketplace: Marketplace) => {
   return `/marketplaces/${marketplace}.png`;
@@ -192,7 +193,12 @@ const OrderList = () => {
                 return (
                 <tr key={detail.id} className={rowClass}>
                   <td className="px-2 py-1 print:py-0.5">{detail.product_quantity}</td>
-                  <td className="px-2 py-1 print:py-0.5">{detail.product_title}</td>
+                  <td className="px-2 py-1 print:py-0.5">
+                    <ProductImagePreview
+                      title={detail.product_title}
+                      imageUrl={detail.image_url}
+                    />
+                  </td>
 
                   {detailIndex === 0 && (
                     <>

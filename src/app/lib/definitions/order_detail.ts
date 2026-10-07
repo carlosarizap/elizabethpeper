@@ -4,6 +4,7 @@ export interface OrderDetail {
     id: string; // UUID
     id_order_header: string; // UUID que referencia a OrderHeader.id
     product_title: string;
+    image_url: string | null;
     product_quantity: number;
     product_price: number;
     marketplace_item_id: string | null;

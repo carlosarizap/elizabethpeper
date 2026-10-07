@@ -5,6 +5,10 @@ import {
   getFilledProductUnitCount,
   getProductSize,
 } from '../products/fill-classification';
+import {
+  createOrderProductImageResolver,
+  loadOrderProductImageCandidates,
+} from '../products/order-product-images';
 
 const DASHBOARD_MONTH_FILTER = `
   (oh.created_at AT TIME ZONE 'America/Santiago')::date >= make_date($1, $2, 1)
@@ -34,6 +38,7 @@ function appendGroupedDetail(
 }
 
 export async function fetchOrders(_page: number = 1, query: string = '') {
+  void _page;
   noStore();
   try {
     const client = await pool.connect();
@@ -121,6 +126,12 @@ export async function fetchOrders(_page: number = 1, query: string = '') {
 
     const rellenos: Record<string, number> = {};
     const headersMap = new Map<string, OrderHeader>();
+    const resolveProductImage = createOrderProductImageResolver(
+      await loadOrderProductImageCandidates(
+        client,
+        result.rows.map((row) => row.marketplace),
+      ),
+    );
 
     for (const row of result.rows) {
       const title = row.product_title?.toLowerCase() || '';
@@ -164,6 +175,11 @@ export async function fetchOrders(_page: number = 1, query: string = '') {
         id: row.detail_id,
         id_order_header: row.id,
         product_title: row.product_title,
+        image_url: resolveProductImage({
+          marketplace: row.marketplace,
+          marketplaceItemId: row.marketplace_item_id,
+          productTitle: row.product_title,
+        }),
         product_quantity: row.product_quantity,
         product_price: row.product_price,
         marketplace_item_id: row.marketplace_item_id,
@@ -240,6 +256,7 @@ export async function fetchAllOrders(
   hasInvoice: string = '',
   status: string = ''
 ) {
+  void _page;
   noStore();
   try {
     const client = await pool.connect();
@@ -260,8 +277,8 @@ export async function fetchAllOrders(
       FROM order_header
     `);
 
-    let filters: string[] = [];
-    let params: any[] = [];
+    const filters: string[] = [];
+    const params: Array<string | boolean> = [];
 
     if (query) {
       filters.push(`(oh.order_id::TEXT ILIKE $${params.length + 1} OR od.product_title ILIKE $${params.length + 1})`);
@@ -348,6 +365,12 @@ export async function fetchAllOrders(
     );
 
     const headersMap = new Map<string, OrderHeader>();
+    const resolveProductImage = createOrderProductImageResolver(
+      await loadOrderProductImageCandidates(
+        client,
+        result.rows.map((row) => row.marketplace),
+      ),
+    );
 
     for (const row of result.rows) {
       if (!headersMap.has(row.id)) {
@@ -382,6 +405,11 @@ export async function fetchAllOrders(
         id: row.detail_id,
         id_order_header: row.id,
         product_title: row.product_title,
+        image_url: resolveProductImage({
+          marketplace: row.marketplace,
+          marketplaceItemId: row.marketplace_item_id,
+          productTitle: row.product_title,
+        }),
         product_quantity: row.product_quantity,
         product_price: row.product_price,
         marketplace_item_id: row.marketplace_item_id,

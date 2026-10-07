@@ -7,7 +7,6 @@ import {
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { PhotoIcon } from '@heroicons/react/24/outline';
 
 interface Props {
   title: string;
@@ -83,21 +82,10 @@ export default function ProductImagePreview({ title, imageUrl, className = '' }:
         type="button"
         aria-expanded={open}
         aria-label={`Ver foto de ${title}`}
-        onPointerEnter={(event) => {
-          if (event.pointerType === 'mouse') setOpen(true);
-        }}
-        onPointerLeave={(event) => {
-          if (event.pointerType === 'mouse') setOpen(false);
-        }}
-        onFocus={() => setOpen(true)}
-        onClick={() => setOpen(true)}
-        className={`group/image inline-flex max-w-full cursor-zoom-in items-start gap-1.5 text-left underline decoration-dotted decoration-slate-300 underline-offset-2 hover:decoration-blue-500 focus:outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-blue-500 ${className}`}
+        onClick={() => setOpen((current) => !current)}
+        className={`inline-flex max-w-full cursor-zoom-in items-start text-left underline decoration-dotted decoration-slate-300 underline-offset-2 hover:decoration-blue-500 focus:outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-blue-500 ${className}`}
       >
         <span>{title}</span>
-        <PhotoIcon
-          className="mt-0.5 h-4 w-4 shrink-0 text-slate-400 transition group-hover/image:text-blue-600 print:hidden"
-          aria-hidden="true"
-        />
       </button>
 
       {open && typeof document !== 'undefined'

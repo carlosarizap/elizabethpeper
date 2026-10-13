@@ -15,6 +15,7 @@
 /tmp/
 /output/
 /.codex-dev-server.log
+/.codex-dev-server-error.log
 
 # next.js
 /.next/

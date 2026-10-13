@@ -1006,28 +1006,78 @@ async function selectOptionByValue(
     await driver.wait(until.elementIsVisible(select), 10000);
     await driver.wait(until.elementIsEnabled(select), 10000);
 
-    const optionExists = await driver.executeScript<boolean>(
-        `const select = arguments[0];
-         const value = arguments[1];
-         const option = Array.from(select.options).find(
-             (candidate) => candidate.value === value
-         );
-         if (!option) return false;
-         select.value = value;
-         select.dispatchEvent(new Event('input', { bubbles: true }));
-         select.dispatchEvent(new Event('change', { bubbles: true }));
-         return true;`,
-        select,
-        value
-    );
+    const fallbackValue = /^0\d$/.test(value)
+        ? String(Number(value))
+        : null;
+    let selectedValue: string | null = null;
+    try {
+        selectedValue = await driver.executeScript<string | null>(
+            `const select = arguments[0];
+             const values = arguments[1];
+             const option = Array.from(select.options).find(
+                 (candidate) => values.includes(candidate.value)
+             );
+             if (!option) return null;
+             select.value = option.value;
+             select.dispatchEvent(new Event('input', { bubbles: true }));
+             select.dispatchEvent(new Event('change', { bubbles: true }));
+             return option.value;`,
+            select,
+            fallbackValue ? [value, fallbackValue] : [value]
+        );
+    } catch (error) {
+        if (!await acceptCreditNoteDateWarning(driver)) throw error;
+        selectedValue = await driver.findElement(locator).getAttribute('value');
+    }
 
-    if (!optionExists) {
-        throw new Error(`La opciÃ³n ${value} no existe en el campo solicitado del SII`);
+    const dateWarningAccepted = await acceptCreditNoteDateWarning(driver);
+    if (selectedValue === null && dateWarningAccepted) {
+        selectedValue = await driver.findElement(locator).getAttribute('value');
+    }
+
+    if (selectedValue === null) {
+        const availableOptions = await driver.executeScript<Array<{
+            value: string;
+            text: string;
+        }>>(
+            `return Array.from(arguments[0].options).map((option) => ({
+                value: option.value,
+                text: option.textContent.trim()
+            }));`,
+            select
+        );
+        throw new Error(
+            `La opciÃ³n ${value} no existe en el campo solicitado del SII. ` +
+            `Opciones disponibles: ${JSON.stringify(availableOptions)}`
+        );
     }
 
     await driver.wait(async () => (
         await driver.findElement(locator).getAttribute('value')
-    ) === value, 10000);
+    ) === selectedValue, 10000);
+}
+
+async function acceptCreditNoteDateWarning(driver: WebDriver) {
+    try {
+        const alert = await driver.switchTo().alert();
+        const alertText = await alert.getText();
+        const normalizedText = alertText
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase();
+
+        if (
+            !normalizedText.includes('la normativa indica') ||
+            !normalizedText.includes('nota de credito o debito')
+        ) {
+            return false;
+        }
+
+        await alert.accept();
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 function parseSiiIssuedDate(value: unknown) {
@@ -1184,6 +1234,8 @@ async function fillSiiCreditNoteForm(
     await driver.wait(until.elementIsVisible(validateButton), 10000);
     await driver.wait(until.elementIsEnabled(validateButton), 10000);
     await validateButton.click();
+    await driver.sleep(250);
+    await acceptCreditNoteDateWarning(driver);
 
     try {
         await driver.wait(async () => (

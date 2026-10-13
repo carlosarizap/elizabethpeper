@@ -16,6 +16,13 @@ const DASHBOARD_MONTH_FILTER = `
     (make_date($1, $2, 1) + INTERVAL '1 month')::date
 `;
 
+const INVOICE_PROCESS_ELIGIBILITY_FILTER = `
+  oh.has_invoice = false
+  AND oh.document_type IN ('boleta', 'factura')
+  AND oh.status IN ('enviado', 'recibido')
+  AND COALESCE(oh.return_status, 'sin_devolucion') = 'sin_devolucion'
+`;
+
 function appendGroupedDetail(
   order: OrderHeader,
   detail: OrderHeader['details'][number],
@@ -729,28 +736,21 @@ export async function fetchOrderStatsByMonth(year: number, month: number) {
             COALESCE(NULLIF(oh.status, ''), 'pendiente') AS status,
             COUNT(*) AS total
           FROM order_header oh
-          WHERE ${DASHBOARD_MONTH_FILTER}
+          WHERE ${INVOICE_PROCESS_ELIGIBILITY_FILTER}
           GROUP BY COALESCE(NULLIF(oh.status, ''), 'pendiente')
-        `, [year, month]),
+        `),
         client.query(`
           SELECT
             COUNT(*) FILTER (
-              WHERE oh.has_invoice = false
-                AND oh.document_type IN ('boleta', 'factura')
-                AND oh.status IN ('pendiente', 'enviado', 'recibido')
-                AND COALESCE(oh.return_status, 'sin_devolucion') = 'sin_devolucion'
+              WHERE ${INVOICE_PROCESS_ELIGIBILITY_FILTER}
             ) AS documentos_pendientes,
             COUNT(*) FILTER (
-              WHERE oh.has_invoice = false
+              WHERE ${INVOICE_PROCESS_ELIGIBILITY_FILTER}
                 AND oh.document_type = 'boleta'
-                AND oh.status IN ('pendiente', 'enviado', 'recibido')
-                AND COALESCE(oh.return_status, 'sin_devolucion') = 'sin_devolucion'
             ) AS boletas_pendientes,
             COUNT(*) FILTER (
-              WHERE oh.has_invoice = false
+              WHERE ${INVOICE_PROCESS_ELIGIBILITY_FILTER}
                 AND oh.document_type = 'factura'
-                AND oh.status IN ('pendiente', 'enviado', 'recibido')
-                AND COALESCE(oh.return_status, 'sin_devolucion') = 'sin_devolucion'
             ) AS facturas_pendientes,
             COUNT(*) FILTER (
               WHERE oh.has_invoice = true
@@ -766,8 +766,7 @@ export async function fetchOrderStatsByMonth(year: number, month: number) {
                 )
             ) AS notas_credito_pendientes
           FROM order_header oh
-          WHERE ${DASHBOARD_MONTH_FILTER}
-        `, [year, month]),
+        `),
       ]);
 
     // Mapear rellenos a objeto clave-valor

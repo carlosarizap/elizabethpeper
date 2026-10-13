@@ -33,14 +33,16 @@ export default function OperationsOverview({ statuses, documents }: Props) {
           Operación y documentos tributarios
         </h2>
         <p className="mt-1 text-sm text-slate-500">
-          Estado de las órdenes y carga pendiente para la automatización del SII.
+          Cola real que procesará la automatización del SII en su próxima ejecución.
         </p>
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
         <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 xl:col-span-3">
-          <h3 className="text-sm font-semibold text-slate-800">Distribución por estado</h3>
-          <p className="mt-1 text-xs text-slate-500">Incluye todas las órdenes registradas en el período.</p>
+          <h3 className="text-sm font-semibold text-slate-800">Órdenes por emitir</h3>
+          <p className="mt-1 text-xs text-slate-500">
+            Solo documentos no emitidos, sin devolución y en estado enviado o recibido.
+          </p>
           {statuses.length > 0 ? (
             <ul className="mt-5 space-y-4">
               {statuses.map((item) => {
@@ -66,7 +68,7 @@ export default function OperationsOverview({ statuses, documents }: Props) {
               })}
             </ul>
           ) : (
-            <p className="mt-5 text-sm text-slate-400">No hay órdenes en este período.</p>
+            <p className="mt-5 text-sm text-slate-400">No hay órdenes listas para emitir.</p>
           )}
         </article>
 
@@ -74,7 +76,7 @@ export default function OperationsOverview({ statuses, documents }: Props) {
           <article className="rounded-2xl border border-blue-100 bg-gradient-to-br from-white to-blue-50 p-5 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-sm font-medium text-slate-600">Documentos pendientes</p>
+                <p className="text-sm font-medium text-slate-600">Documentos por emitir</p>
                 <p className="mt-1 text-3xl font-bold tracking-tight text-slate-900">
                   {documents.documentos_pendientes.toLocaleString('es-CL')}
                 </p>

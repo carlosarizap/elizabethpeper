@@ -10,10 +10,10 @@ interface Props {
 }
 
 const statusStyles: Record<string, { label: string; bar: string; badge: string }> = {
-  pendiente: { label: 'Pendiente', bar: 'bg-amber-400', badge: 'bg-amber-50 text-amber-700' },
+  pendiente: { label: 'Pendiente', bar: 'bg-amber-400', badge: 'bg-amber-100 text-amber-900' },
   enviado: { label: 'Enviado', bar: 'bg-blue-500', badge: 'bg-blue-50 text-blue-700' },
   recibido: { label: 'Recibido', bar: 'bg-emerald-500', badge: 'bg-emerald-50 text-emerald-700' },
-  cancelado: { label: 'Cancelado', bar: 'bg-red-500', badge: 'bg-red-50 text-red-700' },
+  cancelado: { label: 'Cancelado', bar: 'bg-red-600', badge: 'bg-red-600 text-white' },
   devuelto: { label: 'Devuelto', bar: 'bg-rose-500', badge: 'bg-rose-50 text-rose-700' },
 };
 

@@ -10,7 +10,7 @@ import {
 const statusVisuals = {
   pendiente: {
     label: 'Pendiente',
-    classes: 'border-amber-200 bg-amber-50 text-amber-700',
+    classes: 'border-amber-300 bg-amber-100 text-amber-900',
     icon: ClockIcon,
   },
   enviado: {
@@ -25,7 +25,7 @@ const statusVisuals = {
   },
   cancelado: {
     label: 'Cancelado',
-    classes: 'border-red-200 bg-red-50 text-red-700',
+    classes: 'border-red-700 bg-red-600 text-white',
     icon: XCircleIcon,
   },
   devuelto: {

@@ -226,7 +226,7 @@ export default function OrderTable({ orders }: Props) {
                               returned
                                 ? 'border-rose-200 bg-rose-50/80'
                                 : cancelled
-                                  ? 'border-red-200 bg-red-50/70'
+                                  ? 'border-red-300 bg-red-100/80'
                                   : 'border-slate-200 bg-white'
                             }`}
                           >

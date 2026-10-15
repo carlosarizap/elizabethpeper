@@ -1,6 +1,14 @@
 import { upsertFalabellaOrder } from '@/app/lib/actions/order-actions';
 import { MARKETPLACES } from '@/app/lib/constants/marketplaces';
-import { getFalabellaInvoiceData } from '@/app/lib/falabella/invoice-data';
+import {
+  getFalabellaInvoiceData,
+  type FalabellaOrder as FalabellaInvoiceOrder,
+} from '@/app/lib/falabella/invoice-data';
+import {
+  fetchAllFalabellaOrderPages,
+  mapWithConcurrency,
+  readFalabellaOrderPage,
+} from '@/app/lib/falabella/order-pagination';
 import { normalizeMarketplaceOrderItemStatus } from '@/app/lib/orders/order-item-status';
 import { normalizeOrderStatus } from '@/app/lib/orders/marketplace-status-mappers';
 import {
@@ -23,6 +31,21 @@ interface FalabellaOrderItem {
   PaidPrice?: unknown;
   Status?: unknown;
 }
+
+interface FalabellaOrder extends FalabellaInvoiceOrder {
+  OrderNumber?: unknown;
+  OrderId?: unknown;
+  InvoiceRequired?: unknown;
+  ShippingFeeTotal?: unknown;
+  PromisedShippingTime?: unknown;
+  Statuses?: {
+    Status?: string | null;
+  };
+  [key: string]: unknown;
+}
+
+const FALABELLA_PAGE_SIZE = 100;
+const FALABELLA_ORDER_CONCURRENCY = 8;
 
 function stringValue(value: unknown): string | null {
   if (typeof value === 'string') return value.trim() || null;
@@ -131,110 +154,130 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const timestamp = getTimestamp();
-    const baseParams: Record<string, string> = {
-      Action: requestedOrderId ? 'GetOrder' : 'GetOrders',
-      Format: 'JSON',
-      Timestamp: timestamp,
-      UserID: userId,
-      Version: '1.0',
-    };
-    if (requestedOrderId) {
-      baseParams.OrderId = sellerCenterOrderId!;
-    } else {
-      baseParams.CreatedAfter = new Date(
-        Date.now() - 1000 * 60 * 60 * 24 * days,
-      ).toISOString();
-    }
-    const signature = calculateSignature(baseParams, apiKey);
-    const queryParams = new URLSearchParams({
-      ...baseParams,
-      Signature: signature,
-    }).toString();
-    const response = await fetch(
-      `https://sellercenter-api.falabella.com/?${queryParams}`,
-    );
-    const data = await response.json();
-    const orders =
-      data?.SuccessResponse?.Body?.Orders?.Order ??
-      data?.SuccessResponse?.Body?.Order ??
-      [];
-    const ordersArray = Array.isArray(orders) ? orders : [orders];
-    const synchronizedOrders = [];
+    const createdAfter = new Date(
+      Date.now() - 1000 * 60 * 60 * 24 * days,
+    ).toISOString();
 
-    for (const order of ordersArray) {
-      const orderNumber = `${order.OrderNumber?.toString()}-${order.OrderId?.toString()}`;
-      const orderId = order.OrderId?.toString();
-      const documentType = order.InvoiceRequired === 'true' ? 'factura' : 'boleta';
-      const shippingAmount = numericValue(order.ShippingFeeTotal);
-      const deliveryDate = order.PromisedShippingTime ?? null;
-      const items = await fetchOrderItems(orderId, timestamp, userId, apiKey);
-      const invoiceData = getFalabellaInvoiceData(order);
-
-      const standardizedStatus = normalizeOrderStatus(
-        MARKETPLACES.FALABELLA,
-        order.Statuses?.Status ?? null,
+    const fetchOrders = async (params: Record<string, string>) => {
+      const signature = calculateSignature(params, apiKey);
+      const queryParams = new URLSearchParams({
+        ...params,
+        Signature: signature,
+      }).toString();
+      const response = await fetch(
+        `https://sellercenter-api.falabella.com/?${queryParams}`,
       );
-
-      const groupedItems = new Map<
-        string,
-        {
-          productTitle: string;
-          quantity: number;
-          totalPrice: number;
-          rawStatus: string | null;
-        }
-      >();
-
-      for (const item of items) {
-        const productTitle = stringValue(item.Name) ?? 'Sin tÃ­tulo';
-        const quantity = Math.max(1, Math.trunc(numericValue(item.Quantity, 1)));
-        const price = numericValue(item.PaidPrice);
-        const marketplaceItemId = getMarketplaceItemId(
-          item,
-          orderId,
-          productTitle,
-        );
-        const rawStatus = stringValue(item.Status);
-        const groupedItem = groupedItems.get(marketplaceItemId);
-
-        if (groupedItem) {
-          groupedItem.quantity += quantity;
-          groupedItem.totalPrice += price * quantity;
-          groupedItem.rawStatus = rawStatus ?? groupedItem.rawStatus;
-        } else {
-          groupedItems.set(marketplaceItemId, {
-            productTitle,
-            quantity,
-            totalPrice: price * quantity,
-            rawStatus,
-          });
-        }
+      const data = await response.json();
+      if (!response.ok || data?.ErrorResponse) {
+        const message =
+          data?.ErrorResponse?.Head?.ErrorMessage ??
+          `Falabella respondió HTTP ${response.status}`;
+        throw new Error(message);
       }
+      return readFalabellaOrderPage<FalabellaOrder>(data);
+    };
 
-      const result = await upsertFalabellaOrder({
-        orderId: orderNumber,
-        shippingAmount,
-        status: standardizedStatus,
-        documentType,
-        deliveryDate,
-        companyRut: invoiceData.companyRut,
-        billingCity: invoiceData.billingCity,
-        items: Array.from(groupedItems, ([marketplaceItemId, item]) => ({
-          marketplaceItemId,
-          productTitle: item.productTitle,
-          productQuantity: item.quantity,
-          productPrice: item.totalPrice / item.quantity,
-          status: normalizeMarketplaceOrderItemStatus(
-            MARKETPLACES.FALABELLA,
-            item.rawStatus,
-          ),
-          marketplaceStatus: item.rawStatus,
-        })),
+    const ordersArray = requestedOrderId
+      ? (await fetchOrders({
+          Action: 'GetOrder',
+          Format: 'JSON',
+          Timestamp: getTimestamp(),
+          UserID: userId,
+          Version: '1.0',
+          OrderId: sellerCenterOrderId!,
+        })).orders
+      : await fetchAllFalabellaOrderPages(
+          (offset, limit) => fetchOrders({
+            Action: 'GetOrders',
+            Format: 'JSON',
+            Timestamp: getTimestamp(),
+            UserID: userId,
+            Version: '1.0',
+            CreatedAfter: createdAfter,
+            Limit: String(limit),
+            Offset: String(offset),
+          }),
+          FALABELLA_PAGE_SIZE,
+        );
+
+    const synchronizedOrders = await mapWithConcurrency(
+      ordersArray,
+      FALABELLA_ORDER_CONCURRENCY,
+      async (order) => {
+        const externalOrderNumber = stringValue(order.OrderNumber);
+        const orderId = stringValue(order.OrderId);
+        if (!externalOrderNumber || !orderId) {
+          throw new Error('Falabella devolvió una orden sin OrderNumber u OrderId.');
+        }
+        const orderNumber = `${externalOrderNumber}-${orderId}`;
+        const documentType = order.InvoiceRequired === 'true' ? 'factura' : 'boleta';
+        const shippingAmount = numericValue(order.ShippingFeeTotal);
+        const deliveryDate = stringValue(order.PromisedShippingTime);
+        const items = await fetchOrderItems(orderId, getTimestamp(), userId, apiKey);
+        const invoiceData = getFalabellaInvoiceData(order);
+
+        const standardizedStatus = normalizeOrderStatus(
+          MARKETPLACES.FALABELLA,
+          stringValue(order.Statuses?.Status),
+        );
+
+        const groupedItems = new Map<
+          string,
+          {
+            productTitle: string;
+            quantity: number;
+            totalPrice: number;
+            rawStatus: string | null;
+          }
+        >();
+
+        for (const item of items) {
+          const productTitle = stringValue(item.Name) ?? 'Sin tÃ­tulo';
+          const quantity = Math.max(1, Math.trunc(numericValue(item.Quantity, 1)));
+          const price = numericValue(item.PaidPrice);
+          const marketplaceItemId = getMarketplaceItemId(
+            item,
+            orderId,
+            productTitle,
+          );
+          const rawStatus = stringValue(item.Status);
+          const groupedItem = groupedItems.get(marketplaceItemId);
+
+          if (groupedItem) {
+            groupedItem.quantity += quantity;
+            groupedItem.totalPrice += price * quantity;
+            groupedItem.rawStatus = rawStatus ?? groupedItem.rawStatus;
+          } else {
+            groupedItems.set(marketplaceItemId, {
+              productTitle,
+              quantity,
+              totalPrice: price * quantity,
+              rawStatus,
+            });
+          }
+        }
+
+        return upsertFalabellaOrder({
+          orderId: orderNumber,
+          shippingAmount,
+          status: standardizedStatus,
+          documentType,
+          deliveryDate,
+          companyRut: invoiceData.companyRut,
+          billingCity: invoiceData.billingCity,
+          items: Array.from(groupedItems, ([marketplaceItemId, item]) => ({
+            marketplaceItemId,
+            productTitle: item.productTitle,
+            productQuantity: item.quantity,
+            productPrice: item.totalPrice / item.quantity,
+            status: normalizeMarketplaceOrderItemStatus(
+              MARKETPLACES.FALABELLA,
+              item.rawStatus,
+            ),
+            marketplaceStatus: item.rawStatus,
+          })),
+        });
       });
-
-      synchronizedOrders.push(result);
-    }
 
     return NextResponse.json({
       mode,

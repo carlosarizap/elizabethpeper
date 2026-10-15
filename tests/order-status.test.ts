@@ -125,6 +125,7 @@ const parisCases = [
   ['available_at_store', ORDER_STATUSES.SHIPPED],
   ['client_changed_address', ORDER_STATUSES.SHIPPED],
   ['delivered', ORDER_STATUSES.DELIVERED],
+  ['refunded', ORDER_STATUSES.RETURNED],
   ['cancelled', ORDER_STATUSES.CANCELED],
   ['stock_shortage_refunded', ORDER_STATUSES.CANCELED],
   ['returned_to_seller', ORDER_STATUSES.RETURNED],

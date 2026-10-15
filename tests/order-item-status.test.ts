@@ -72,6 +72,7 @@ const parisItemCases = [
   ['client_changed_address', ITEM.SHIPPED],
   ['delivered', ITEM.DELIVERED],
   ['overage', ITEM.DELIVERED],
+  ['refunded', ITEM.RETURNED],
   ['cancelled', ITEM.CANCELED],
   ['stock_shortage_refunded', ITEM.CANCELED],
   ['returned', ITEM.RETURNED],

@@ -65,16 +65,16 @@ export default function DashboardContainer() {
       {!loading && !error && stats ? (
         <>
           <DashboardSummaryCards summary={stats.summary} />
+          <OperationsOverview
+            statuses={stats.statusDistribution}
+            documents={stats.documents}
+          />
           <DailySalesChart data={stats.dailySales} />
           <MarketplaceCards data={stats.marketplaces} />
           <ReturnsOverview
             summary={stats.summary}
             byMarketplace={stats.returnsByMarketplace}
             products={stats.returnedProducts}
-          />
-          <OperationsOverview
-            statuses={stats.statusDistribution}
-            documents={stats.documents}
           />
           <ProductStatsRow topProducts={stats.topProducts} rellenos={stats.rellenos} />
         </>

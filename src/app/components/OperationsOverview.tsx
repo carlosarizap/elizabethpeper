@@ -30,18 +30,18 @@ export default function OperationsOverview({ statuses, documents }: Props) {
     <section aria-labelledby="operations-title">
       <div className="mb-4">
         <h2 id="operations-title" className="text-base font-semibold text-slate-900">
-          Operación y documentos tributarios
+          Estado de las órdenes del mes
         </h2>
         <p className="mt-1 text-sm text-slate-500">
-          Cola real que procesará la automatización del SII en su próxima ejecución.
+          Distribución porcentual de todas las órdenes registradas en el período seleccionado.
         </p>
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
         <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 xl:col-span-3">
-          <h3 className="text-sm font-semibold text-slate-800">Órdenes por emitir</h3>
+          <h3 className="text-sm font-semibold text-slate-800">Distribución por estado</h3>
           <p className="mt-1 text-xs text-slate-500">
-            Solo documentos no emitidos, sin devolución y en estado enviado o recibido.
+            Incluye órdenes pendientes, enviadas, recibidas, canceladas y devueltas.
           </p>
           {statuses.length > 0 ? (
             <ul className="mt-5 space-y-4">
@@ -68,7 +68,7 @@ export default function OperationsOverview({ statuses, documents }: Props) {
               })}
             </ul>
           ) : (
-            <p className="mt-5 text-sm text-slate-400">No hay órdenes listas para emitir.</p>
+            <p className="mt-5 text-sm text-slate-400">No hay órdenes en este período.</p>
           )}
         </article>
 

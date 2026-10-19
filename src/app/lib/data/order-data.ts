@@ -736,9 +736,9 @@ export async function fetchOrderStatsByMonth(year: number, month: number) {
             COALESCE(NULLIF(oh.status, ''), 'pendiente') AS status,
             COUNT(*) AS total
           FROM order_header oh
-          WHERE ${INVOICE_PROCESS_ELIGIBILITY_FILTER}
+          WHERE ${DASHBOARD_MONTH_FILTER}
           GROUP BY COALESCE(NULLIF(oh.status, ''), 'pendiente')
-        `),
+        `, [year, month]),
         client.query(`
           SELECT
             COUNT(*) FILTER (

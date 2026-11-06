@@ -30,6 +30,7 @@ import {
   getMarketplaceSyncDays,
   getMarketplaceSyncMode,
 } from '@/app/lib/orders/marketplace-sync';
+import { getMercadoLibreRetryDelayMs } from '@/app/lib/mercadolibre/api-retry';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -143,21 +144,34 @@ async function mercadoLibreGet<T>(
   const url = pathOrUrl.startsWith('http')
     ? pathOrUrl
     : `${MERCADO_LIBRE_API}${pathOrUrl}`;
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-  });
 
-  if (response.status === 404 && options.allowNotFound) return null;
-  if (!response.ok) {
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    });
+
+    if (response.status === 404 && options.allowNotFound) return null;
+    if (response.ok) return await response.json() as T;
+
     const body = await response.text();
-    throw new MercadoLibreApiError(response.status, url, body);
-  }
+    const retryDelay = getMercadoLibreRetryDelayMs(
+      response.status,
+      response.headers.get('retry-after'),
+      attempt,
+    );
+    if (retryDelay === null) {
+      throw new MercadoLibreApiError(response.status, url, body);
+    }
 
-  return await response.json() as T;
+    console.warn(
+      `[MercadoLibre] Limite temporal de solicitudes; reintento ${attempt + 1} en ${retryDelay} ms.`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, retryDelay));
+  }
 }
 
 async function fetchUpdatedOrderIds(

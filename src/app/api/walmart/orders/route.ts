@@ -21,6 +21,7 @@ import {
   getMarketplaceSyncDays,
   getMarketplaceSyncMode,
 } from '@/app/lib/orders/marketplace-sync';
+import { isWalmartReturnsNotFound } from '@/app/lib/walmart/returns-response';
 import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -134,6 +135,12 @@ async function walmartJson<T>(
     throw new Error(`Walmart respondio ${response.status}: ${body.slice(0, 500)}`);
   }
   if (!response.ok) {
+    if (
+      pathAndQuery.startsWith('/v3/returns') &&
+      isWalmartReturnsNotFound(response.status, payload)
+    ) {
+      return { returnOrders: [], meta: {} } as T;
+    }
     throw new Error(`Walmart respondio ${response.status}: ${body.slice(0, 500)}`);
   }
   return payload;

@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import {
   ChartBarIcon,
   ClipboardDocumentListIcon,
+  DocumentTextIcon,
   ArrowRightStartOnRectangleIcon,
   ListBulletIcon,
   TruckIcon,
@@ -32,6 +33,11 @@ const navItems = [
     label: 'Despachos',
     href: '/dispatches',
     icon: TruckIcon,
+  },
+  {
+    label: 'Cotizaciones',
+    href: '/quotes',
+    icon: DocumentTextIcon,
   },
 ];
 

@@ -44,6 +44,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 interface PrintBody {
   clientRequestId?: unknown;
   orderHeaderIds?: unknown;
+  walmartPackages?: Record<string, unknown>;
 }
 
 interface Candidate {
@@ -401,7 +402,7 @@ export async function POST(request: NextRequest) {
     const walmartDocuments: WalmartLabelPrintInput[] = [];
     const walmartAttempts = await mapWithConcurrency(walmartCandidates, 3, async (candidate) => {
       try {
-        const result = await prepareWalmartShippingLabelPdfs(candidate.order_id);
+        const result = await prepareWalmartShippingLabelPdfs(candidate.order_id, body.walmartPackages?.[candidate.id]);
         return {
           candidate,
           documents: result.documents,
@@ -425,6 +426,7 @@ export async function POST(request: NextRequest) {
           document: preparedDocument.document,
           orderId: attempt.candidate.order_id,
           productSummary: preparedDocument.productSummary,
+          fullPage: preparedDocument.fullPage,
         })));
         completed.push({ candidate: attempt.candidate, shipmentId: null });
         await pool.query(

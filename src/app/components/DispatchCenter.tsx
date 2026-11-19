@@ -1,6 +1,8 @@
 'use client';
 
 import Image from 'next/image';
+import WalmartPackagePlanner from './WalmartPackagePlanner';
+import type { WalmartPackageInput } from '@/app/lib/walmart/wcp-labels';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowPathIcon,
@@ -23,6 +25,7 @@ import type {
   RipleyDispatchResponse,
   WalmartDispatchOrder,
   WalmartDispatchResponse,
+  WalmartPackagePreview,
 } from '@/app/lib/dispatches/definitions';
 import {
   newlyDiscoveredPendingOrdersForToday,
@@ -235,8 +238,8 @@ function mergeOrders(
       waitingForLabel: false,
       confirmed: order.acknowledged,
       reason: order.acknowledged
-        ? order.printCount === 0 ? 'Walmart ya aprobó la orden; la etiqueta se descargará al imprimir.' : null
-        : 'Al imprimir, el sistema aprobará la orden en Walmart y descargará su etiqueta.',
+        ? order.printCount === 0 ? 'Al preparar, podrás revisar los bultos de Walmart y generar o recuperar sus etiquetas.' : null
+        : 'Al preparar, revisa los bultos; el sistema aceptará la orden y generará sus etiquetas.',
     })),
   ];
   return merged.sort((left, right) => (
@@ -281,6 +284,7 @@ export default function DispatchCenter() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const [walmartPreviews, setWalmartPreviews] = useState<WalmartPackagePreview[] | null>(null);
   const [readyingShipmentId, setReadyingShipmentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -473,8 +477,25 @@ export default function DispatchCenter() {
     }
   };
 
-  const printSelected = async () => {
+  const printSelected = async (walmartPackages?: Record<string, WalmartPackageInput[]>) => {
     if (selectedOrders.length === 0) return;
+    if (walmartPackages === undefined && selectedOrders.some((o) => o.marketplace === 'walmart')) {
+      setPrinting(true);
+      setError(null);
+      try {
+        const previews = await Promise.all(selectedOrders.filter((o) => o.marketplace === 'walmart').map(async (order) => {
+          const response = await fetch(`/api/dispatches/walmart/${order.id}/packages`, { cache: 'no-store' });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error ?? 'No se pudieron consultar los bultos de Walmart.');
+          return payload as WalmartPackagePreview;
+        }));
+        const wcp = previews.filter((p) => p.isWCPOrder);
+        if (wcp.length) { setWalmartPreviews(wcp); return; }
+      } catch (error) {
+        setError(error instanceof Error ? error.message : 'No se pudieron preparar los bultos.');
+        return;
+      } finally { setPrinting(false); }
+    }
     const printWindow = window.open('', '_blank');
     if (printWindow) {
       printWindow.document.title = 'Preparando etiquetas';
@@ -520,6 +541,7 @@ export default function DispatchCenter() {
         body: JSON.stringify({
           clientRequestId: crypto.randomUUID(),
           orderHeaderIds: refreshedSelection.map((order) => order.id),
+          walmartPackages,
         }),
       });
       const result = await response.json().catch(() => null) as DispatchPrintResponse | ApiError | null;
@@ -590,7 +612,7 @@ export default function DispatchCenter() {
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Centro de despacho</p>
             <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">Bandeja de etiquetas</h1>
             <p className="mt-1 max-w-4xl text-sm leading-5 text-slate-500">
-              Mercado Libre, Falabella, París, Ripley y Walmart en una sola vista. Las etiquetas se reúnen en un PDF tamaño carta; Falabella se confirma y Walmart se aprueba automáticamente al prepararlas.
+              Mercado Libre, Falabella, París, Ripley y Walmart en una sola vista. Las etiquetas se reúnen en un PDF tamaño carta; Falabella se confirma y Walmart permite revisar los bultos antes de generar sus etiquetas.
             </p>
           </div>
           <button type="button" onClick={syncAll} disabled={syncing || printing} className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50">
@@ -702,8 +724,12 @@ export default function DispatchCenter() {
 
         <div className="fixed inset-x-3 bottom-3 z-30 mx-auto flex max-w-[1700px] flex-col gap-2 rounded-xl border border-slate-200/90 bg-white/95 px-3 py-2.5 shadow-lg backdrop-blur transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl sm:inset-x-5 sm:flex-row sm:items-center sm:justify-between lg:inset-x-6">
           <div><p className="font-semibold text-slate-900">{selectedOrders.length} orden(es) seleccionada(s)</p><p className="text-xs text-slate-500">Un solo lote y un solo PDF tamaño carta para todos los marketplaces seleccionados.</p></div>
-          <button type="button" onClick={printSelected} disabled={selectedOrders.length === 0 || printing || syncing} className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:bg-slate-300"><PrinterIcon className="h-4 w-4" />{printing ? 'Preparando etiquetas…' : 'Preparar e imprimir'}</button>
+          <button type="button" onClick={() => void printSelected()} disabled={selectedOrders.length === 0 || printing || syncing} className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:bg-slate-300"><PrinterIcon className="h-4 w-4" />{printing ? 'Preparando etiquetas…' : 'Preparar e imprimir'}</button>
         </div>
+        {walmartPreviews ? <WalmartPackagePlanner orders={walmartPreviews} onCancel={() => setWalmartPreviews(null)} onConfirm={(packages) => {
+          setWalmartPreviews(null);
+          void printSelected(packages);
+        }} /> : null}
       </div>
     </main>
   );

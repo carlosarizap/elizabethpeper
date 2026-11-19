@@ -32,6 +32,15 @@ const WALMART_CROP = {
   top: 815,
 };
 
+// WCP's domestic 4 x 8-inch PDF puts the carrier label and Walmart logo in
+// the top portion. The lower portion contains integration metadata, not a
+// shipping label. Keep the barcode, destination and logo at their native size.
+const WALMART_WCP_CROP = { left: 8, bottom: 330, right: 280, top: 576 };
+
+function isWcpCompactLabel(width: number, height: number, rotation: number): boolean {
+  return Math.abs(width - 288) < 1 && Math.abs(height - 576) < 1 && rotation === 0;
+}
+
 interface WalmartCredentials {
   clientId: string;
   clientSecret: string;
@@ -56,11 +65,13 @@ export interface WalmartLabelPrintInput {
   document: Uint8Array;
   orderId: string;
   productSummary: string | null;
+  fullPage?: boolean;
 }
 
 export interface WalmartPreparedLabelDocument {
   document: Uint8Array;
   productSummary: string;
+  fullPage?: boolean;
 }
 
 export interface WalmartLabelGroup {
@@ -373,11 +384,25 @@ async function waitForTrackingNumbers(order: WalmartOrder): Promise<{
 
 export async function prepareWalmartShippingLabelPdfs(
   purchaseOrderId: string,
+  packages?: unknown,
 ): Promise<{ documents: WalmartPreparedLabelDocument[]; acknowledged: boolean }> {
   let order = await fetchWalmartOrderForLabel(purchaseOrderId);
   const eligibility = getWalmartLabelEligibility(order);
   if (!eligibility.eligible) {
     throw new Error(eligibility.reason ?? 'La orden Walmart no está disponible para imprimir.');
+  }
+
+  if (order.isWCPOrder === true) {
+    const { prepareStoredWcpLabels } = await import('./wcp-runtime');
+    let acknowledged = false;
+    const documents = await prepareStoredWcpLabels(order, {
+      request: walmartRequest, download: downloadWalmartLabels,
+      acknowledge: eligibility.shouldAcknowledge ? async () => {
+        await acknowledgeWalmartOrder(order);
+        acknowledged = true;
+      } : undefined,
+    }, packages);
+    return { documents, acknowledged };
   }
 
   let acknowledged = false;
@@ -438,6 +463,28 @@ export async function composeWalmartLabelsWithProductSummaryPdf(
   for (const input of inputs) {
     const source = await PDFDocument.load(input.document);
     for (const sourcePage of source.getPages()) {
+      const compactWcp = Boolean(input.fullPage) && isWcpCompactLabel(
+        sourcePage.getWidth(), sourcePage.getHeight(), sourcePage.getRotation().angle,
+      );
+      if (input.fullPage && !compactWcp) {
+        const page = output.addPage([LETTER_WIDTH, LETTER_HEIGHT]);
+        const availableWidth = LETTER_WIDTH - GRID_MARGIN * 2;
+        const availableHeight = LETTER_HEIGHT - GRID_MARGIN * 2 - SUMMARY_HEIGHT - SUMMARY_GAP;
+        const scale = Math.min(1, availableWidth / sourcePage.getWidth(), availableHeight / sourcePage.getHeight());
+        const embedded = await output.embedPage(sourcePage);
+        const width = sourcePage.getWidth() * scale;
+        const height = sourcePage.getHeight() * scale;
+        const x = GRID_MARGIN;
+        const labelBottom = LETTER_HEIGHT - GRID_MARGIN - height;
+        page.drawPage(embedded, { x, y: labelBottom, width, height });
+        drawProductSummaryBlock(page, {
+          x, y: labelBottom - SUMMARY_GAP - SUMMARY_HEIGHT,
+          width, height: SUMMARY_HEIGHT, orderId: input.orderId,
+          productSummary: input.productSummary, regularFont, boldFont, bodyFontSize: 8, maxLines: 4,
+        });
+        labelIndex = 0;
+        continue;
+      }
       const slot = labelIndex % (GRID_COLUMNS * GRID_ROWS);
       const targetPage = slot === 0
         ? output.addPage([LETTER_WIDTH, LETTER_HEIGHT])
@@ -450,20 +497,27 @@ export async function composeWalmartLabelsWithProductSummaryPdf(
         - (rowFromTop + 1) * cellHeight
         - rowFromTop * GRID_GAP;
       const availableLabelHeight = cellHeight - SUMMARY_HEIGHT - SUMMARY_GAP;
-      const scale = Math.min(cellWidth / cropWidth, availableLabelHeight / cropHeight);
-      const drawWidth = cropWidth * scale;
-      const drawHeight = cropHeight * scale;
-      const embeddedPage = await output.embedPage(sourcePage, WALMART_CROP);
+      const crop = compactWcp ? WALMART_WCP_CROP : WALMART_CROP;
+      const width = compactWcp ? crop.right - crop.left : cropWidth;
+      const height = compactWcp ? crop.top - crop.bottom : cropHeight;
+      const scale = Math.min(cellWidth / width, availableLabelHeight / height);
+      const drawWidth = width * scale;
+      const drawHeight = height * scale;
+      const embeddedPage = await output.embedPage(sourcePage, crop);
+
+      const labelBottom = compactWcp
+        ? cellY + cellHeight - drawHeight
+        : cellY + (availableLabelHeight - drawHeight) / 2;
 
       targetPage.drawPage(embeddedPage, {
         x: cellX + (cellWidth - drawWidth) / 2,
-        y: cellY + (availableLabelHeight - drawHeight) / 2,
+        y: labelBottom,
         width: drawWidth,
         height: drawHeight,
       });
       drawProductSummaryBlock(targetPage, {
         x: cellX,
-        y: cellY + availableLabelHeight + SUMMARY_GAP,
+        y: compactWcp ? labelBottom - SUMMARY_GAP - SUMMARY_HEIGHT : cellY + availableLabelHeight + SUMMARY_GAP,
         width: cellWidth,
         height: SUMMARY_HEIGHT,
         orderId: input.orderId,

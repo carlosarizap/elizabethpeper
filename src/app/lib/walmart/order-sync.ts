@@ -55,6 +55,7 @@ export interface WalmartOrderLine {
 }
 
 export interface WalmartOrder {
+  isWCPOrder?: boolean | null;
   purchaseOrderId?: string | number | null;
   customerOrderId?: string | number | null;
   orderDate?: string | number | null;

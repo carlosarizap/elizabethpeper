@@ -146,3 +146,19 @@ export interface WalmartDispatchResponse {
   };
   generatedAt: string;
 }
+
+export interface WalmartPackagePreview {
+  id: string;
+  orderId: string;
+  isWCPOrder: boolean;
+  saved: boolean;
+  lines: Array<{
+    lineNumber: string;
+    sku: string;
+    title: string;
+    quantity: number;
+    packaging: import('../walmart/packaging').ProductPackaging | null;
+    packagingError: string | null;
+  }>;
+  packages: import('../walmart/wcp-labels').WalmartPackageInput[];
+}

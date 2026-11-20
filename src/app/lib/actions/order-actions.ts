@@ -470,6 +470,23 @@ export async function upsertMercadoLibreOrder(order: MercadoLibreOrderInput) {
       [`mercado_libre:${order.orderId}`],
     );
 
+    const exclusion = await client.query(
+      `SELECT 1
+       FROM marketplace_order_exclusion
+       WHERE marketplace = $1 AND order_id = $2`,
+      [MARKETPLACES.MERCADO_LIBRE, order.orderId],
+    );
+    if ((exclusion.rowCount ?? 0) > 0) {
+      await client.query('COMMIT');
+      return {
+        success: true,
+        repeated: true,
+        excluded: true,
+        orderHeaderId: null,
+        returnStatus: 'sin_devolucion' as const,
+      };
+    }
+
     const existingHeader = await client.query(
       `SELECT id, status, delivery_date, delivery_date_source, has_invoice, invoice_uploaded,
               invoice_pdf, marketplace, document_type

@@ -4,9 +4,59 @@ import { PDFDocument } from 'pdf-lib';
 import {
   composeParisLabelsLetterGridPdf,
   downloadParisShippingLabelPdfs,
+  resolveParisShippingAccessToken,
 } from '../src/app/lib/paris/shipping-labels.ts';
 
 const PDF_BYTES = new TextEncoder().encode('%PDF-1.4\n% test label');
+
+test('París conserva el token derivado y admite API key si el intercambio responde 401', async () => {
+  assert.equal(await resolveParisShippingAccessToken(async () => 'derived', 'key'), 'derived');
+  assert.equal(await resolveParisShippingAccessToken(async () => {
+    throw Object.assign(new Error('Unauthorized'), { response: { status: 401 } });
+  }, 'key'), 'key');
+  await assert.rejects(resolveParisShippingAccessToken(async () => {
+    throw Object.assign(new Error('Unavailable'), { response: { status: 503 } });
+  }, 'key'), /Unavailable/);
+});
+
+test('París recupera la etiqueta exacta por v1 con API key si shipments rechaza la autenticación', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: string[] = [];
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.includes('/v2/shipments/')) return Response.json({ message: 'Unauthorized' }, { status: 401 });
+    if (url.includes('/v1/orders?')) {
+      assert.equal(new URL(url).searchParams.get('sellerId'), 'seller');
+      assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer api-key');
+      return Response.json({ data: [{ subOrders: [
+        { subOrderNumber: 'OTHER', labelId: 'WRONG' },
+        { subOrderNumber: '3160267881', labelId: 'EXACT' },
+      ] }] });
+    }
+    if (url.endsWith('/v1/sub-orders/EXACT/print-label')) {
+      return Response.json({ data: [{ labels: 'https://labels.example/fallback.pdf', url: 'https://labels.example/fallback.pdf' }] });
+    }
+    if (url === 'https://labels.example/fallback.pdf') return new Response(PDF_BYTES);
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  try {
+    const documents = await downloadParisShippingLabelPdfs('3160267881', 'token', { apiKey: 'api-key', sellerId: 'seller' });
+    assert.equal(documents.length, 1);
+    assert.ok(!requests.some((url) => url.includes('WRONG')));
+    assert.equal(requests.filter((url) => url === 'https://labels.example/fallback.pdf').length, 1);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('París no imprime una orden diferente si la búsqueda alternativa no devuelve la solicitada', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => String(input).includes('/v2/shipments/')
+    ? Response.json({ message: 'Unauthorized' }, { status: 403 })
+    : Response.json({ data: [{ subOrders: [{ subOrderNumber: 'OTHER', labelId: 'WRONG' }] }] });
+  try {
+    await assert.rejects(downloadParisShippingLabelPdfs('3160267881', 'token', { apiKey: 'key', sellerId: 'seller' }), /todavía no generó/);
+  } finally { globalThis.fetch = originalFetch; }
+});
 
 test('París usa la etiqueta unitaria para un envío de un paquete', async () => {
   const originalFetch = globalThis.fetch;

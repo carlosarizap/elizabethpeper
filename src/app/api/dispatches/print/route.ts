@@ -22,6 +22,7 @@ import {
   composeParisLabelsLetterGridPdf,
   downloadParisShippingLabelPdfs,
   parisLabelError,
+  resolveParisShippingAccessToken,
   type ParisLabelPrintInput,
 } from '@/app/lib/paris/shipping-labels';
 import {
@@ -329,7 +330,7 @@ export async function POST(request: NextRequest) {
     if (parisCandidates.length > 0) {
       let parisAccessToken: string | null = null;
       try {
-        parisAccessToken = await getParisUploadAccessToken();
+        parisAccessToken = await resolveParisShippingAccessToken(getParisUploadAccessToken, process.env.PARIS_ACCESS_TOKEN);
       } catch (error) {
         const message = parisLabelError(error);
         failed.push(...parisCandidates.map((candidate) => ({ candidate, message })));
@@ -343,6 +344,7 @@ export async function POST(request: NextRequest) {
             const documents = await downloadParisShippingLabelPdfs(
               candidate.order_id,
               parisAccessToken,
+              { apiKey: process.env.PARIS_ACCESS_TOKEN, sellerId: process.env.PARIS_SELLER_ID },
             );
             return { candidate, documents, message: null as string | null };
           } catch (error) {

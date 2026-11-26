@@ -41,6 +41,39 @@ export interface ParisLabelPrintInput {
 
 type ParisLabelSource = Uint8Array | ParisLabelPrintInput;
 
+class ParisApiError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function isAuthenticationError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const value = error as { status?: number; response?: { status?: number } };
+  return [401, 403].includes(value.response?.status ?? value.status ?? 0);
+}
+
+/** The API key can still authorize v1 labels when the token exchange rejects it. */
+export async function resolveParisShippingAccessToken(
+  exchange: () => Promise<string>,
+  apiKey: string | undefined,
+): Promise<string> {
+  try {
+    return await exchange();
+  } catch (error) {
+    if (apiKey?.trim() && isAuthenticationError(error)) return apiKey.trim();
+    throw error;
+  }
+}
+
+interface ParisLabelFallback {
+  apiKey?: string;
+  sellerId?: string;
+}
+
 function cleanString(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   const cleaned = String(value).trim();
@@ -112,7 +145,7 @@ async function parisApiRequest(path: string, accessToken: string): Promise<unkno
     const message = cleanString(payload?.message)
       ?? cleanString(payload?.error)
       ?? cleanString(rawBody)?.slice(0, 220);
-    throw new Error(`París respondió ${response.status}${message ? `: ${message}` : ''}`);
+    throw new ParisApiError(response.status, `París respondió ${response.status}${message ? `: ${message}` : ''}`);
   }
   return payload;
 }
@@ -156,11 +189,33 @@ async function downloadPdf(url: string): Promise<Uint8Array> {
 export async function downloadParisShippingLabelPdfs(
   subOrderNumber: string,
   accessToken: string,
+  fallback: ParisLabelFallback = {},
 ): Promise<Uint8Array[]> {
-  const payload = await parisApiRequest(
-    `/v2/shipments/${encodeURIComponent(subOrderNumber)}`,
-    accessToken,
-  );
+  let payload: unknown;
+  try {
+    payload = await parisApiRequest(
+      `/v2/shipments/${encodeURIComponent(subOrderNumber)}`,
+      accessToken,
+    );
+  } catch (error) {
+    if (!isAuthenticationError(error) || !fallback.apiKey || !fallback.sellerId) throw error;
+    const query = new URLSearchParams({ sellerId: fallback.sellerId, subOrderNumber, limit: '100', offset: '0' });
+    const orders = await parisApiRequest(`/v1/orders?${query}`, fallback.apiKey) as {
+      data?: Array<{ subOrders?: Array<{ subOrderNumber?: string; labelId?: string }> }>;
+    };
+    // Always verify the exact sub-order; never print another order returned by a search.
+    const labelIds = [...new Set(asArray(orders?.data)
+      .flatMap((order) => asArray(order.subOrders))
+      .filter((order) => String(order.subOrderNumber) === subOrderNumber)
+      .map((order) => cleanString(order.labelId))
+      .filter((id): id is string => Boolean(id)))];
+    if (!labelIds.length) throw new Error('París todavía no generó la etiqueta para esta orden.');
+    const urls = new Set<string>();
+    for (const labelId of labelIds) {
+      for (const url of await requestLabelUrls(labelId, false, fallback.apiKey)) urls.add(url);
+    }
+    return Promise.all([...urls].map(downloadPdf));
+  }
   const shipments = asArray(payload as ParisShipment | ParisShipment[] | null);
   const labelIds = shipments
     .map((shipment) => cleanString(shipment.labelId))
